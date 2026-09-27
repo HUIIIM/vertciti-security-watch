@@ -1,0 +1,33 @@
+# Source idea: actions/starter-workflows (CI concept). Tailored for this repo.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  python:
+    name: Python syntax check (py_compile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile all Python files
+        run: python -m compileall -q $(find . -name "*.py" -not -path "./.git/*") && echo "py_compile OK"
+  shell:
+    name: Shell scripts (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+      - name: Check scripts
+        run: find . -name "*.sh" -not -path "./.git/*" -print0 | xargs -0 -r shellcheck -S warning
