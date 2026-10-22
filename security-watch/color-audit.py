@@ -15,7 +15,11 @@ vertciti 色彩审计脚本（T1.1，P0，只读）
 
 data URI 里的 #xxx 一律剔除（只在 CSS 声明值位置提取）；紧跟 url( 的 #id 引用剔除。
 """
-import json, re, sys, bisect, colorsys
+import bisect
+import colorsys
+import json
+import re
+import sys
 from collections import Counter
 
 HEX_RE  = re.compile(r'#[0-9a-fA-F]{8}\b|#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{4}\b|#[0-9a-fA-F]{3}\b')
@@ -96,7 +100,9 @@ def parse_func(name, inner):
             alpha = float(a4[:-1]) / 100.0 if a4.endswith('%') else float(a4)
         if len(comps) != 3:
             return None
-        r = parse_num(comps[0]); g = parse_num(comps[1]); b = parse_num(comps[2])
+        r = parse_num(comps[0])
+        g = parse_num(comps[1])
+        b = parse_num(comps[2])
     else:
         if len(comps) == 4 and name == 'hsla':
             a4 = comps.pop()
@@ -109,8 +115,8 @@ def parse_func(name, inner):
                 h = h[:-len(suf)]
         h = float(h) % 360.0
         s = parse_num(comps[1], scale255=False)
-        l = parse_num(comps[2], scale255=False)
-        rf, gf, bf = colorsys.hls_to_rgb(h / 360.0, max(0.0, min(1.0, l)),
+        lum = parse_num(comps[2], scale255=False)
+        rf, gf, bf = colorsys.hls_to_rgb(h / 360.0, max(0.0, min(1.0, lum)),
                                          max(0.0, min(1.0, s)))
         r, g, b = rf * 255.0, gf * 255.0, bf * 255.0
     r, g, b = int(round(r)), int(round(g)), int(round(b))
@@ -204,8 +210,8 @@ def audit(path):
                    if media else sel)
             body = rm.group(2)
             base = b.start(1)
-            def line_of(p, _base=base):
-                return lineno(offs, _base + rm.start(2) + p)
+            def line_of(p, _base=base, _rm=rm):
+                return lineno(offs, _base + _rm.start(2) + p)
             extract_from_decls(body, ctx, line_of, records)
 
     # style= 属性
@@ -215,7 +221,8 @@ def audit(path):
             continue
         tag_ctx = text[max(0, sm.start() - 80):sm.start()].split('<')[-1][:60]
         ctx = 'style-attr <%s>' % tag_ctx.strip()
-        def line_of(p, _s=sm.start(2)):
+        attr_start = sm.start(2)
+        def line_of(p, _s=attr_start):
             return lineno(offs, _s + p)
         extract_from_decls(val, ctx, line_of, records)
 
@@ -228,8 +235,8 @@ def cluster(records):
         by_key.setdefault(rec['key'], rec)
     clusters = []
     def hue_group(r, g, b):
-        h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
-        return h * 360.0, l, s
+        h, lum, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+        return h * 360.0, lum, s
     groups = {
         'alpha 半透明': [], 'near-white 白/极浅': [], 'light-gray 浅灰': [],
         'gray 中灰': [], 'dark-gray 深灰': [], 'near-black 近黑': [],
@@ -242,7 +249,7 @@ def cluster(records):
         if a < 1.0:
             groups['alpha 半透明'].append(key)
             continue
-        h, l, s = hue_group(r, g, b)
+        h, _lum, s = hue_group(r, g, b)
         mx = max(r, g, b) / 255.0
         mn = min(r, g, b) / 255.0
         if s < 0.10 or (mx - mn) < 0.06:

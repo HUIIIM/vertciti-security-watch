@@ -7,6 +7,11 @@
 **vertciti.com 每次生产发布前必跑的三道门禁**——敏感信息扫描、首页 200、
 390px 触控目标，全部脚本化；任一 FAIL 即停发，没有例外。
 
+> **状态 / Status**：内部工具，维护中；尚无带版本号的发布（无 git tag）。脚本默认路径绑定维护者本机目录，
+> 已知限制见 [docs/PRODUCT.md](docs/PRODUCT.md)。属于 [vertciti](https://vertciti.com)。
+> Internal tool, maintained; no tagged release yet. Default paths assume the maintainer's machine;
+> see [docs/PRODUCT.md](docs/PRODUCT.md) for known limitations. Part of [vertciti](https://vertciti.com).
+
 ![demo](docs/assets/demo.gif)
 
 > demo GIF 为本机真实运行：门禁 1 通过 → 门禁 3 通过 → 混入假密钥后 FAIL
@@ -61,15 +66,13 @@ curl -sI https://vertciti.com/ | head -1                   # 门禁 2：首页 2
 ## 测试
 
 ```bash
-bash -n security-watch/data-room-gate.sh && echo "gate syntax OK"
-bash -n qa-gates/touch-target-check.sh && echo "touch syntax OK"
-python3 -m py_compile security-watch/color-audit.py security-watch/shadow-audit.py && echo "py OK"
-# 真实跑一遍（2026-10-02 本机实测）：
-bash security-watch/data-room-gate.sh   # 默认扫生产 data-room
+pip install pytest ruff
+ruff check .          # lint（规则见 ruff.toml）
+python3 -m pytest -q  # 8 个冒烟测试 / 8 smoke tests（2026-10-22 本地：8 passed）
 ```
 
-CI（`.github/workflows/ci.yml`）：shell 脚本 `bash -n`、Python `py_compile`、
-gitleaks 密钥扫描，push/PR 自动跑。
+CI（`.github/workflows/ci.yml`）：ruff + pytest、Python `py_compile`、shellcheck；
+gitleaks 密钥扫描在 `.github/workflows/gitleaks.yml`。push 到 main 与 PR 时自动运行。
 
 ## 贡献
 
@@ -79,6 +82,18 @@ gitleaks 密钥扫描，push/PR 自动跑。
 
 vertciti 为 Miao 构建运营人生的个人 AI 基础设施。
 
-## 许可证
+## 安全 / Security
 
-vertciti clean-room engineering — proprietary. 详见 [LICENSE](LICENSE)。
+发现安全问题请勿开公开 issue，按 [.github/SECURITY.md](.github/SECURITY.md) 的流程私下报告。
+Please do not open a public issue for vulnerabilities; follow [.github/SECURITY.md](.github/SECURITY.md).
+
+已知限制 / Known limitation：`data-room-gate.sh` 从 `$HOME/workspace/vertcity/security-watch/gate-allowlist.txt`
+读取 allowlist；该目录不存在时多数检查会被跳过并输出 PASS（私钥块检查除外）。在其他机器上运行前请先创建该目录。
+If that allowlist directory does not exist, most checks are skipped and the gate reports PASS
+(the private-key check still runs). Create the directory before running elsewhere.
+
+## 许可证 / License
+
+专有许可（非开源）：LICENSE 原文为 "vertciti clean-room engineering — proprietary.
+Copyright (c) 2026 vertciti. All rights reserved." 详见 [LICENSE](LICENSE)。
+Proprietary, all rights reserved — see [LICENSE](LICENSE).
