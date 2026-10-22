@@ -1,13 +1,24 @@
-vertciti clean-room engineering — proprietary.
+Copyright (c) 2026 VERTCITY LLC. All rights reserved.
 
-Copyright (c) 2026 vertciti. All rights reserved.
+This repository and its contents — release-gate shell scripts and
+read-only Python audit scripts that guard vertciti.com production
+releases — are the proprietary property of VERTCITY LLC. The codebase
+is original expression written for vertciti under the company's
+clean-room rule: no code was copied from any prior codebase.
 
-This codebase ("vertciti chat", codename `chat`) is original expression written
-for vertciti. No code was copied from any prior codebase: the 2023 line served
-as read-only learning material only (D67 / D147 clean-room chain), and
-integration with the anomalies clean-room runtime is over HTTP product-surface
-APIs only (M1 bidirectional zero-dependency rule).
+No part of this repository may be copied, modified, distributed,
+published, sublicensed, or used to create derivative works, except as
+expressly permitted in writing by VERTCITY LLC. Access to this
+repository is for viewing only and grants no license or right to use any
+code or asset contained herein.
 
-Third-party dependencies are listed in backend/requirements.txt with pinned
-versions; their licenses are permissive (MIT/BSD) and verified by
-ci/license-scan.py on every CI run.
+Use of the vertciti name, logos, and brand assets is governed by the
+brand usage terms published on vertciti.com, not by this file.
+
+Third-party tooling used at runtime with this repository (including
+Playwright, Chromium, and shellcheck) is not distributed with this
+repository and remains under its respective license terms.
+
+THE CONTENTS OF THIS REPOSITORY ARE PROVIDED "AS IS", WITHOUT WARRANTY
+OF ANY KIND, EXPRESS OR IMPLIED, TO THE EXTENT PERMITTED BY APPLICABLE
+LAW.
