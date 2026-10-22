@@ -15,9 +15,10 @@ jobs:
   python:
     name: Python syntax check (py_compile)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Compile all Python files
@@ -25,6 +26,7 @@ jobs:
   shell:
     name: Shell scripts (shellcheck)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - name: Install shellcheck
