@@ -13,7 +13,7 @@ vertciti.com 生产发布前运行的三道发布门禁脚本（敏感信息扫�
 | 联系 | 安全漏洞：[.github/SECURITY.md](.github/SECURITY.md) · 产品：[vertciti.com](https://vertciti.com) |
 
 演示录屏（本机真实运行：门禁 1 通过 → 门禁 3 通过 → 混入假密钥后 FAIL 停发）、架构图和门禁运行截图在
-[docs/assets](docs/assets)；仓库为私有，因此这里只给链接、不内嵌图片。演示用的是假密钥（`ghp_fake…`），不含任何真实凭证。
+[docs/assets](docs/assets)；仓库已公开，演示图以链接形式给出、不内嵌。演示用的是假密钥（`ghp_fake…`），不含任何真实凭证。
 
 ## 概览
 
