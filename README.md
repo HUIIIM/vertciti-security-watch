@@ -8,7 +8,7 @@ vertciti.com 生产发布前运行的三道发布门禁脚本（敏感信息扫�
 | 部署 | 不部署：在发布流水线或维护者本机运行。需要 bash、Python 3（CI 用 3.13）；门禁 3 需要 Playwright＋Chromium。脚本默认路径绑定维护者本机目录 |
 | 在线演示 | 不适用 |
 | 接口 | 命令行（bash 门禁脚本 · 只读 Python 审计脚本），以退出码表示通过/失败 |
-| 许可证 | 专有，保留所有权利（[LICENSE](LICENSE)，现文本署名 VERTCITY LLC）；许可证归属待所有者决定 |
+| 许可证 | 专有，保留所有权利，VERTCITY LLC（[LICENSE](LICENSE)，法务裁定文本 GC-20261022-002） |
 | 语言 | 简体中文（安全、许可证段落附英文） |
 | 联系 | 安全漏洞：[.github/SECURITY.md](.github/SECURITY.md) · 产品：[vertciti.com](https://vertciti.com) |
 
@@ -96,10 +96,10 @@ vertciti-security-watch/
 
 本仓库为 vertciti 内部工程，暂不接受外部 PR；发现问题请走内部渠道。
 
-**许可证 / License**：专有许可（非开源），保留所有权利，详见 [LICENSE](LICENSE)。LICENSE 现文本署名 VERTCITY LLC；
-许可证归属仍待所有者决定。
-Proprietary, all rights reserved — see [LICENSE](LICENSE). The current text names VERTCITY LLC; licence ownership
-is pending an owner decision.
+**许可证 / License**：专有许可（非开源），保留所有权利，详见 [LICENSE](LICENSE)。权利人 VERTCITY LLC，
+文本经法务裁定（GC-20261022-002）。
+Proprietary, all rights reserved — see [LICENSE](LICENSE). Rights holder: VERTCITY LLC; the text is the
+GC-ruled version (GC-20261022-002).
 
 ---
 
