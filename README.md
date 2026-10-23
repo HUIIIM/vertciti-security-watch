@@ -1,27 +1,42 @@
-![vertciti security-watch](docs/assets/hero.png)
+# vertciti security-watch
 
-[![CI](https://github.com/HUIIIM/vertciti-security-watch/actions/workflows/ci.yml/badge.svg)](https://github.com/HUIIIM/vertciti-security-watch/actions/workflows/ci.yml)
-[![Secret scan](https://github.com/HUIIIM/vertciti-security-watch/actions/workflows/gitleaks.yml/badge.svg)](https://github.com/HUIIIM/vertciti-security-watch/actions/workflows/gitleaks.yml)
-[![license](https://img.shields.io/badge/license-proprietary-lightgrey)](LICENSE)
+vertciti.com 生产发布前运行的三道发布门禁脚本（敏感信息扫描、首页 200、390px 触控目标），给负责发布 vertciti.com 的维护者使用；任一门禁 FAIL 即停止发布。
 
-**vertciti.com 每次生产发布前必跑的三道门禁**——敏感信息扫描、首页 200、
-390px 触控目标，全部脚本化；任一 FAIL 即停发，没有例外。
+| | |
+|---|---|
+| 状态 | 内部工具，维护中；尚无带版本号的发布（无 git tag）。CI 在 push 到 main 和 PR 时运行 ruff、pytest、`py_compile`、shellcheck；另有 CodeQL、dependency-review、gitleaks、Scorecard |
+| 部署 | 不部署：在发布流水线或维护者本机运行。需要 bash、Python 3（CI 用 3.13）；门禁 3 需要 Playwright＋Chromium。脚本默认路径绑定维护者本机目录 |
+| 在线演示 | 不适用 |
+| 接口 | 命令行（bash 门禁脚本 · 只读 Python 审计脚本），以退出码表示通过/失败 |
+| 许可证 | 专有，保留所有权利（[LICENSE](LICENSE)，现文本署名 VERTCITY LLC）；许可证归属待所有者决定 |
+| 语言 | 简体中文（安全、许可证段落附英文） |
+| 联系 | 安全漏洞：[.github/SECURITY.md](.github/SECURITY.md) · 产品：[vertciti.com](https://vertciti.com) |
 
-> **状态 / Status**：内部工具，维护中；尚无带版本号的发布（无 git tag）。脚本默认路径绑定维护者本机目录，
-> 已知限制见 [docs/PRODUCT.md](docs/PRODUCT.md)。属于 [vertciti](https://vertciti.com)。
-> Internal tool, maintained; no tagged release yet. Default paths assume the maintainer's machine;
-> see [docs/PRODUCT.md](docs/PRODUCT.md) for known limitations. Part of [vertciti](https://vertciti.com).
+演示录屏（本机真实运行：门禁 1 通过 → 门禁 3 通过 → 混入假密钥后 FAIL 停发）、架构图和门禁运行截图在
+[docs/assets](docs/assets)；仓库为私有，因此这里只给链接、不内嵌图片。演示用的是假密钥（`ghp_fake…`），不含任何真实凭证。
 
-![demo](docs/assets/demo.gif)
+## 概览
 
-> demo GIF 为本机真实运行：门禁 1 通过 → 门禁 3 通过 → 混入假密钥后 FAIL
-> 停发。演示用假密钥（`ghp_fake…`），不含任何真实凭证。
+vertciti.com 每次生产发布前要过三道门禁，全部脚本化：敏感信息扫描、首页返回 200、390px 视口下的触控目标尺寸。
+三道门禁是发布流水线的硬门，不是建议：脚本 FAIL 时 exit 1，发布必须停下，没有"这次先过"的开关。
+误报在 allowlist 里登记，而不是放宽扫描器。产品一页纸见 [docs/PRODUCT.md](docs/PRODUCT.md)。
 
-## 30 秒 quickstart
+## 能力一览
+
+| # | 门禁 / 工具 | 脚本 | 判定 |
+|---|---|---|---|
+| 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | FAIL：私钥 / `ghp_` 等 token / 绝密字样 / `2027-02`。WARN（人工复核）：口令赋值、邮箱地址。默认扫描生产 `data-room/` |
+| 2 | 首页可访问 | `curl -sI https://vertciti.com/` | 非 200 即 FAIL（在部署任务内执行） |
+| 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕 |
+| — | 颜色审计 | `security-watch/color-audit.py` | 只读：提取首页内联 CSS 与 `style=` 中的全部色值并统计 |
+| — | box-shadow 审计 | `security-watch/shadow-audit.py` | 只读：列出首页每条 box-shadow 声明的选择器、行号与取值 |
+| — | allowlist | `security-watch/gate-allowlist.txt` | 门禁 1 的误报在这里登记；审计产物归档在 `security-watch/archive/` |
+
+## 快速开始
 
 ```bash
 cd vertciti-security-watch
-bash security-watch/data-room-gate.sh --help   # 看门禁 1 的 FAIL/WARN 规则
+bash security-watch/data-room-gate.sh --help        # 看门禁 1 的 FAIL/WARN 规则
 bash security-watch/data-room-gate.sh ./data-room   # 扫一个目录（默认扫生产 data-room）
 ```
 
@@ -30,70 +45,62 @@ bash qa-gates/touch-target-check.sh https://vertciti.com/  # 门禁 3：390px �
 curl -sI https://vertciti.com/ | head -1                   # 门禁 2：首页 200
 ```
 
-## 它是怎么工作的
-
-![架构](docs/assets/architecture.png)
-
-三门禁是发布流水线的硬门，不是建议：
-
-| # | 门禁 | 脚本 | FAIL 条件 |
-|---|---|---|---|
-| 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | 私钥 / `ghp_` 等 token / 绝密字样 / `2027-02` |
-| 2 | 首页可访问 | `curl -sI https://vertciti.com/` → 200 | 非 200（部署任务内执行） |
-| 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | 390px 视口下可交互元素 < 44px |
-
-门禁 1 的 WARN（人工复核）：口令赋值、邮箱地址——在
-`security-watch/gate-allowlist.txt` 登记误报，而不是放宽扫描器。
-
-![门禁运行](docs/assets/screenshot-gate.png)
-
-## 功能
-
-- **门禁 1：data-room 敏感扫描**——2027-02 / 绝密字样 / 私钥 / token 为
-  FAIL；口令赋值 / 邮箱为 WARN。默认扫描生产 `data-room/`。
-- **门禁 3：390px 触控目标检查**——headless 渲染量取所有可见可交互元素
-  boundingBox，断言宽高 ≥ 44px（WCAG 2.5.8）；纯文本内联链接豁免但留痕。
-- **颜色对比度审计**（`color-audit.py`）与**影子探针审计**（`shadow-audit.py`）——
-  独立运行的审计脚本，产物归档在 `security-watch/archive/`。
-- **allowlist 机制**：误报在 `gate-allowlist.txt` 登记，扫描器本身不放水。
-
-## 诚实约定
-
-- 门禁脚本只做它声明的事：扫描/断言/报告，不自动改生产、不动防火墙。
-- FAIL 就是停发——脚本 exit 1，发布流水线必须停，没有"这次先过"的开关。
-- 影子探针（shadow-audit）只观测记录，不向外推送。
-
-## 测试
+开发检查：
 
 ```bash
 pip install pytest ruff
 ruff check .          # lint（规则见 ruff.toml）
-python3 -m pytest -q  # 8 个冒烟测试 / 8 smoke tests（2026-10-22 本地：8 passed）
+python3 -m pytest -q  # 冒烟测试
 ```
 
-CI（`.github/workflows/ci.yml`）：ruff + pytest、Python `py_compile`、shellcheck；
-gitleaks 密钥扫描在 `.github/workflows/gitleaks.yml`。push 到 main 与 PR 时自动运行。
+CI 配置在 `.github/workflows/ci.yml`（ruff＋pytest、`py_compile`、shellcheck），gitleaks 密钥扫描在
+`.github/workflows/gitleaks.yml`。
 
-## 贡献
+## 架构
+
+```
+vertciti-security-watch/
+├── security-watch/   # 门禁 1（data-room-gate.sh）、allowlist、只读审计脚本与归档
+├── qa-gates/         # 门禁 3（touch-target-check.sh，Playwright + Chromium）
+├── tests/            # 审计脚本冒烟测试
+└── docs/             # PRODUCT.md 与 assets
+```
+
+每道门禁是独立脚本，以退出码向发布流水线报告结果；门禁 2 是部署任务里的一条 `curl`。架构图见
+[docs/assets/architecture.png](docs/assets/architecture.png)。
+
+## 安全与合规
+
+- 门禁脚本只做它声明的事：扫描、断言、报告。不自动改生产，不动防火墙。
+- 审计脚本只读：不修改输入文件，也不向外推送结果。
+- 发现安全问题请勿开公开 issue，按 [.github/SECURITY.md](.github/SECURITY.md) 的流程私下报告。
+  Please do not open a public issue for vulnerabilities; follow [.github/SECURITY.md](.github/SECURITY.md).
+
+## 现状与边界
+
+内部工具，维护中，尚无带版本号的发布；变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+已知限制：
+- `data-room-gate.sh` 从 `$HOME/workspace/vertcity/security-watch/gate-allowlist.txt` 读取 allowlist；该目录不存在时，
+  多数检查会被跳过并输出 PASS（私钥块检查除外）。在其他机器上运行前请先创建该目录。
+  If that allowlist directory does not exist, most checks are skipped and the gate reports PASS
+  (the private-key check still runs). Create the directory before running elsewhere.
+- 审计脚本与门禁 3 的默认路径（`~/workspace/...`、`/opt/meta-chromium/chrome`）绑定维护者本机。
+
+更多见 [docs/PRODUCT.md](docs/PRODUCT.md)。
+
+## 文档 · 支持 · 许可证
+
+[产品一页纸](docs/PRODUCT.md) · [更新记录](CHANGELOG.md) · [security-watch 说明](security-watch/README.md) ·
+[贡献说明](.github/CONTRIBUTING.md)
 
 本仓库为 vertciti 内部工程，暂不接受外部 PR；发现问题请走内部渠道。
 
-## 关于 vertciti
+**许可证 / License**：专有许可（非开源），保留所有权利，详见 [LICENSE](LICENSE)。LICENSE 现文本署名 VERTCITY LLC；
+许可证归属仍待所有者决定。
+Proprietary, all rights reserved — see [LICENSE](LICENSE). The current text names VERTCITY LLC; licence ownership
+is pending an owner decision.
 
-vertciti 为 Miao 构建运营人生的个人 AI 基础设施。
+---
 
-## 安全 / Security
-
-发现安全问题请勿开公开 issue，按 [.github/SECURITY.md](.github/SECURITY.md) 的流程私下报告。
-Please do not open a public issue for vulnerabilities; follow [.github/SECURITY.md](.github/SECURITY.md).
-
-已知限制 / Known limitation：`data-room-gate.sh` 从 `$HOME/workspace/vertcity/security-watch/gate-allowlist.txt`
-读取 allowlist；该目录不存在时多数检查会被跳过并输出 PASS（私钥块检查除外）。在其他机器上运行前请先创建该目录。
-If that allowlist directory does not exist, most checks are skipped and the gate reports PASS
-(the private-key check still runs). Create the directory before running elsewhere.
-
-## 许可证 / License
-
-专有许可（非开源）：LICENSE 原文为 "vertciti clean-room engineering — proprietary.
-Copyright (c) 2026 vertciti. All rights reserved." 详见 [LICENSE](LICENSE)。
-Proprietary, all rights reserved — see [LICENSE](LICENSE).
+由 [vertciti](https://vertciti.com) 构建。vertciti 为 Miao 构建运营人生的个人 AI 基础设施。
