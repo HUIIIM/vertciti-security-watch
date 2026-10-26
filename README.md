@@ -81,11 +81,11 @@ vertciti-security-watch/
 内部工具，维护中，尚无带版本号的发布；变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 已知限制：
-- `data-room-gate.sh` 从 `$HOME/workspace/vertcity/security-watch/gate-allowlist.txt` 读取 allowlist；该目录不存在时，
-  多数检查会被跳过并输出 PASS（私钥块检查除外）。在其他机器上运行前请先创建该目录。
-  If that allowlist directory does not exist, most checks are skipped and the gate reports PASS
-  (the private-key check still runs). Create the directory before running elsewhere.
-- 审计脚本与门禁 3 的默认路径（`~/workspace/...`、`/opt/meta-chromium/chrome`）绑定维护者本机。
+- `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发；不可读时 fail-closed 停发，
+  不再静默跳过检查（早期固定机器专属绝对路径、不可达时假过 PASS 的问题已修复）。
+  The allowlist resolves relative to the script's own directory and ships with it; an unreadable
+  allowlist fails closed instead of silently skipping checks.
+- 审计脚本与门禁 3 的解释器/目标路径经环境变量显式指定（无内置默认）；浏览器路径 `/opt/meta-chromium/chrome` 绑定维护者本机。
 
 更多见 [docs/PRODUCT.md](docs/PRODUCT.md)。
 

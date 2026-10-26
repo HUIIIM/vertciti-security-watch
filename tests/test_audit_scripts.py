@@ -81,7 +81,7 @@ def test_shadow_parse_rules_tracks_media() -> None:
 # ---- data-room-gate.sh ----
 
 def _run_gate(home: Path, data_dir: Path) -> subprocess.CompletedProcess:
-    # The gate reads its allowlist from $HOME/workspace/vertcity/security-watch/.
+    # The gate resolves its allowlist relative to the script's own directory.
     (home / "workspace/vertcity/security-watch").mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "HOME": str(home)}
     return subprocess.run(

@@ -26,4 +26,5 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 - GitHub Actions 升级到最新主版本 / GitHub Actions upgraded to latest major versions (2026-09-27, `6b61814`).
 
 ### Fixed
+- `security-watch/data-room-gate.sh`：目标目录参数化（位置参数/环境变量 `DATA_ROOM_DIR`、无内置默认），allowlist 改脚本同目录相对解析＋不可读 fail-closed，消除固定机器专属绝对路径与已退役检出路径默认；`qa-gates/touch-target-check.sh` 解释器改经 `TOUCH_TARGET_PYTHON` 指定 / gate target parameterized, allowlist script-relative with fail-closed guard, touch-target interpreter via env var (2026-10-26).
 - gitleaks workflow 增加 `pull-requests: read` 权限 / gitleaks workflow gains `pull-requests: read` (2026-10-22).

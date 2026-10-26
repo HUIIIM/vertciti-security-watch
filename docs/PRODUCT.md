@@ -21,7 +21,7 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
 ## 怎么用（三步）/ How to use
 1. 门禁 1 / Gate 1：`bash security-watch/data-room-gate.sh [目录]` — 扫描 `*.txt`，FAIL 时 exit 1。
 2. 门禁 2 / Gate 2：`curl -sI https://vertciti.com/ | head -1` — 期望 HTTP 200。
-3. 门禁 3 / Gate 3：`bash qa-gates/touch-target-check.sh [URL]` — 390px 视口下可交互元素宽高均需 ≥ 44px；依赖 `~/workspace/.qa-venv`（playwright）与 `/opt/meta-chromium/chrome`。
+3. 门禁 3 / Gate 3：`bash qa-gates/touch-target-check.sh [URL]` — 390px 视口下可交互元素宽高均需 ≥ 44px；依赖 playwright（解释器经环境变量 `TOUCH_TARGET_PYTHON` 指定）与 `/opt/meta-chromium/chrome`。
 
 另有两个只读审计脚本 / Two read-only audit scripts：`security-watch/color-audit.py <index.html> [--json out.json]`（色值统计与聚类）、`security-watch/shadow-audit.py [--json PATH] [--table]`（box-shadow 逐项清单）。
 
@@ -42,8 +42,8 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
 ## 边界与风险 / Scope and risks
 - 不做 / Does not：不自动修改生产文件、不改防火墙、不向外推送（见 README"诚实约定"）。
 - 已知限制 / Known limitations：
-  - `data-room-gate.sh` 的 allowlist 路径固定为 `$HOME/workspace/vertcity/security-watch/gate-allowlist.txt`，不是本仓库的 `security-watch/gate-allowlist.txt`。若该目录不存在，`grep -f` 报错，FAIL/WARN 检查（`2027-02`、绝密字样、token、口令、邮箱）会被跳过并输出 PASS（2026-10-22 本地复现）。私钥块检查不受影响。
-    The allowlist path is fixed to `$HOME/workspace/vertcity/...`; if that directory is missing, most checks are silently skipped and the gate reports PASS (reproduced locally 2026-10-22). The private-key check is unaffected.
+  - `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发，不可读时 fail-closed 停发。早期版本曾固定为维护者本机绝对路径——该目录不存在时 `grep -f` 报错被管道吞掉，FAIL/WARN 检查（`2027-02`、绝密字样、token、口令、邮箱）会被跳过并输出 PASS（2026-10-22 本地复现，已修复）。私钥块检查不受影响。
+    The allowlist now resolves relative to the script's own directory and ships with it; an unreadable allowlist fails closed. An earlier version used a fixed maintainer-machine absolute path, and a missing directory silently skipped most checks and reported PASS (reproduced locally 2026-10-22; fixed). The private-key check was unaffected.
   - 只扫描 `*.txt` 文件 / Only `*.txt` files are scanned.
   - `shadow-audit.py` 输入路径须经位置参数或环境变量 `SHADOW_AUDIT_SRC` 显式传入，无内置默认目标（早期版本曾硬编码维护者本机生产源路径，已参数化）。
   - `touch-target-check.sh` 默认目标与依赖路径绑定维护者本机。

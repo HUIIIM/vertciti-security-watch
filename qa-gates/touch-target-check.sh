@@ -16,7 +16,7 @@
 # 豁免: 纯文本内联链接 (display:inline 的 <a>, 如段落内链接) 不计违规,
 #      但计入豁免清单输出备查。
 #
-# 依赖: ~/workspace/.qa-venv (playwright sync_api) + /opt/meta-chromium/chrome
+# 依赖: playwright sync_api (解释器经环境变量 TOUCH_TARGET_PYTHON 指定) + /opt/meta-chromium/chrome
 # 注意: localhost 会被 LocalNetworkAccessChecks 拦截, 本地渲染请用 file:// URL。
 # 标注: [PASS]/[FAIL]/[EXEMPT] 均为 ASCII 括号。
 # =====================================================================
@@ -25,7 +25,7 @@ set -u
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "用法: ./touch-target-check.sh [--help] [URL]"
   echo "  390px 触控目标门禁：无参数时经环境变量 TOUCH_TARGET_PROD_FILE 测生产源文件，传 URL 测任意地址（如 https://vertciti.com/）。"
-  echo "  依赖: ~/workspace/.qa-venv (playwright) + /opt/meta-chromium/chrome"
+  echo "  依赖: playwright (解释器经环境变量 TOUCH_TARGET_PYTHON 指定) + /opt/meta-chromium/chrome"
   exit 0
 fi
 
@@ -37,7 +37,12 @@ if [ -z "$URL" ]; then
   exit 2
 fi
 
-PY="$HOME/workspace/.qa-venv/bin/python"
+PY="${TOUCH_TARGET_PYTHON:-}"
+
+if [ -z "$PY" ]; then
+  echo "[FAIL] python not configured: set TOUCH_TARGET_PYTHON to a python interpreter with playwright installed" >&2
+  exit 2
+fi
 
 if [ ! -x "$PY" ]; then
   echo "[FAIL] python not found: $PY" >&2
