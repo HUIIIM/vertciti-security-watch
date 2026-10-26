@@ -5,8 +5,8 @@
 # 断言 宽>=44 且 高>=44 (WCAG 2.5.8 / Apple HIG 触控下限)。
 #
 # 用法:
-#   ./touch-target-check.sh            # 测生产源文件
-#                                      # file:///home/hatch/workspace/vertcity/deploy-prod-root/index.html
+#   ./touch-target-check.sh            # 测生产源文件（其 file:// URL 经
+#                                      # 环境变量 TOUCH_TARGET_PROD_FILE 指定）
 #   ./touch-target-check.sh <URL>      # 测任意 URL (如 https://vertciti.com/)
 #
 # 输出:
@@ -24,13 +24,19 @@ set -u
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "用法: ./touch-target-check.sh [--help] [URL]"
-  echo "  390px 触控目标门禁：无参数测生产源文件，传 URL 测任意地址（如 https://vertciti.com/）。"
+  echo "  390px 触控目标门禁：无参数时经环境变量 TOUCH_TARGET_PROD_FILE 测生产源文件，传 URL 测任意地址（如 https://vertciti.com/）。"
   echo "  依赖: ~/workspace/.qa-venv (playwright) + /opt/meta-chromium/chrome"
   exit 0
 fi
 
-PROD_FILE="file:///home/hatch/workspace/vertcity/deploy-prod-root/index.html"
+PROD_FILE="${TOUCH_TARGET_PROD_FILE:-}"
 URL="${1:-$PROD_FILE}"
+
+if [ -z "$URL" ]; then
+  echo "[FAIL] no target: pass a URL argument, or set TOUCH_TARGET_PROD_FILE to the production index.html file:// URL" >&2
+  exit 2
+fi
+
 PY="$HOME/workspace/.qa-venv/bin/python"
 
 if [ ! -x "$PY" ]; then

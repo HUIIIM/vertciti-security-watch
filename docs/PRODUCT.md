@@ -45,7 +45,7 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
   - `data-room-gate.sh` 的 allowlist 路径固定为 `$HOME/workspace/vertcity/security-watch/gate-allowlist.txt`，不是本仓库的 `security-watch/gate-allowlist.txt`。若该目录不存在，`grep -f` 报错，FAIL/WARN 检查（`2027-02`、绝密字样、token、口令、邮箱）会被跳过并输出 PASS（2026-10-22 本地复现）。私钥块检查不受影响。
     The allowlist path is fixed to `$HOME/workspace/vertcity/...`; if that directory is missing, most checks are silently skipped and the gate reports PASS (reproduced locally 2026-10-22). The private-key check is unaffected.
   - 只扫描 `*.txt` 文件 / Only `*.txt` files are scanned.
-  - `shadow-audit.py` 输入路径硬编码为 `/home/hatch/workspace/vertcity/deploy-prod-root/index.html`，无命令行参数可改。
+  - `shadow-audit.py` 输入路径须经位置参数或环境变量 `SHADOW_AUDIT_SRC` 显式传入，无内置默认目标（早期版本曾硬编码维护者本机生产源路径，已参数化）。
   - `touch-target-check.sh` 默认目标与依赖路径绑定维护者本机。
 - 安全与隐私 / Security & privacy：脚本只读本地文件并输出到 stdout（命中的 token 只输出前缀如 `ghp_****`，其余打码 / matched tokens print only their prefix）；不存储、不上传数据。漏洞报告见 [`.github/SECURITY.md`](../.github/SECURITY.md)。
 

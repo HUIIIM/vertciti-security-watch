@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """T2.1 box-shadow 逐项审计脚本（只读）.
-扫描 ~/workspace/vertcity/deploy-prod-root/index.html 内所有 box-shadow 声明,
+扫描目标 index.html 内所有 box-shadow 声明（文件路径经第一个位置参数
+或环境变量 SHADOW_AUDIT_SRC 传入，无内置默认目标）,
 输出: 选择器 / 行号 / 完整值 / 是否 none / 是否 @media 内.
-用法: python3 shadow-audit.py [--json PATH] [--table]
+用法: python3 shadow-audit.py [INDEX.html] [--json PATH] [--table]
+      SHADOW_AUDIT_SRC=/path/to/index.html python3 shadow-audit.py
 """
 import json
+import os
 import re
 import sys
-
-SRC = "/home/hatch/workspace/vertcity/deploy-prod-root/index.html"
 
 
 def style_regions(src):
@@ -58,6 +59,7 @@ def main():
     args = sys.argv[1:]
     json_path = None
     want_table = False
+    src_arg = None
     i = 0
     while i < len(args):
         if args[i] == "--json" and i + 1 < len(args):
@@ -66,10 +68,20 @@ def main():
         elif args[i] == "--table":
             want_table = True
             i += 1
+        elif not args[i].startswith("--") and src_arg is None:
+            src_arg = args[i]
+            i += 1
         else:
             i += 1
 
-    src = open(SRC, encoding="utf-8").read()
+    src_path = src_arg or os.environ.get("SHADOW_AUDIT_SRC", "")
+    if not src_path:
+        print("usage: shadow-audit.py [INDEX.html] [--json PATH] [--table]\n"
+              "  target index.html: first positional argument, "
+              "or the SHADOW_AUDIT_SRC environment variable",
+              file=sys.stderr)
+        return 2
+    src = open(src_path, encoding="utf-8").read()
     regions = style_regions(src)
     items = []
     for rstart, rend in regions:
@@ -131,4 +143,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
