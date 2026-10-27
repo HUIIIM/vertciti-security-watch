@@ -119,7 +119,9 @@ def parse_func(name, inner):
         rf, gf, bf = colorsys.hls_to_rgb(h / 360.0, max(0.0, min(1.0, lum)),
                                          max(0.0, min(1.0, s)))
         r, g, b = rf * 255.0, gf * 255.0, bf * 255.0
-    r, g, b = int(round(r)), int(round(g)), int(round(b))
+    # CSS 会把越界分量钳到合法范围；不钳会生成 #12c0000 这类非法键
+    r, g, b = (int(round(max(0.0, min(255.0, v)))) for v in (r, g, b))
+    alpha = max(0.0, min(1.0, alpha))
     if alpha >= 1.0:
         return '#%02x%02x%02x' % (r, g, b), r, g, b, 1.0
     a3 = round(alpha, 3)
@@ -293,7 +295,11 @@ def main():
         sys.exit(1)
     json_out = None
     if '--json' in sys.argv:
-        json_out = sys.argv[sys.argv.index('--json') + 1]
+        i = sys.argv.index('--json') + 1
+        if i >= len(sys.argv) or sys.argv[i].startswith('-'):
+            print('用法: python3 color-audit.py <index.html> [--json out.json]（--json 缺少输出路径）')
+            sys.exit(1)
+        json_out = sys.argv[i]
     records, nblocks = audit(path)
     counts = Counter(r['key'] for r in records)
     first = {}

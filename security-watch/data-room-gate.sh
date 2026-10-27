@@ -16,6 +16,13 @@
 #   - 命中输出默认脱敏：只出 文件:行号 与掩码/指纹，口令、连接串、token 与
 #     敏感正文的明文零出 stdout。GATE_SHOW_CONTENT=1 可显式改为输出原文，
 #     仅限本机人工复核，禁止在 CI/日志留存环境开启（明文会进日志）。
+# 2026-10-27 (issue #5) 覆盖面补强：
+#   - 扫描目录内全部普通文件，不再只扫 *.txt（.md/.json/.html/.csv/.pem 等此前完全不扫）；
+#   - 无法按文本扫描的二进制文件（PDF/DOCX/图片等）一律 FAIL，人工复核后以
+#     bin:<相对路径>:<sha256(文件)> 登记 allowlist 放行（文件变化后条目自动失效）；
+#   - 不再按 "classification" 整行豁免绝密字样（"Classification: TOP SECRET" 应停发）；
+#   - 2027-02 识别 2027/02、2027.02、2027年2月、Feb 2027 等写法；token 增加
+#     github_pat_、ghs_/ghu_/ghr_、sk-ant-、AIza。
 # 用法：bash data-room-gate.sh [data-room目录]
 set -u
 set -o pipefail
@@ -24,6 +31,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "  发布前必跑门禁：FAIL=停发，WARN=人工复核。"
   echo "  [data-room目录] 经位置参数或环境变量 DATA_ROOM_DIR 指定，无默认；未指定即报错退出。"
   echo "  allowlist: 脚本同目录 gate-allowlist.txt，条目为 <相对路径>:<行号>:<精确内容> 或 fp:<sha256>，精确匹配。"
+  echo "  二进制文件（无法按文本扫描）默认 FAIL；人工复核后以 bin:<相对路径>:<sha256(文件)> 放行。"
   echo "  命中输出默认脱敏；GATE_SHOW_CONTENT=1 输出原文（仅限本机人工复核，禁止在 CI 开启）。"
   exit 0
 fi
@@ -50,17 +58,34 @@ GRC=$?
 if [ "$GRC" -ge 2 ]; then echo "GATE FAIL: allowlist 读取错误 $ALLOWLIST_SRC —— fail-closed 停发"; exit 1; fi
 
 # 扫描文件数：只计普通文件（grep -r 不跟随扫描树内符号链接，计数口径与实际扫描一致）。
-if ! find "$DIR" -type f -name '*.txt' > "$WORK_TMP/files" 2>/dev/null; then
+if ! find "$DIR" -type f -print0 > "$WORK_TMP/files" 2>/dev/null; then
   echo "GATE FAIL: 枚举目标文件失败 —— fail-closed 停发"; exit 1
 fi
-FILE_COUNT="$(wc -l < "$WORK_TMP/files")"
+FILE_COUNT="$(tr -cd '\0' < "$WORK_TMP/files" | wc -c)"
 if [ "$FILE_COUNT" -eq 0 ]; then
-  echo "GATE FAIL: 目标目录内可扫描 .txt 文件数为 0 —— 拒绝真空通过"; exit 1
+  echo "GATE FAIL: 目标目录内文件数为 0 —— 拒绝真空通过"; exit 1
 fi
 
 say_fail() { echo "GATE FAIL: $1"; FAIL=1; }
 say_warn() { echo "GATE WARN: $1"; WARN=1; }
 scan_error() { echo "GATE FAIL: $1 扫描过程出错（grep 退出码 $2）—— fail-closed 停发"; FAIL=1; }
+
+# 0. 二进制文件：grep -I 会静默跳过，等于没扫。非空且无法按文本读取的文件一律 FAIL，
+#    除非 allowlist 有与当前文件内容绑定的 bin:<相对路径>:<sha256> 条目。
+#    （不可读文件由下方各规则的 grep 退出码 >=2 判 FAIL。）
+: > "$WORK_TMP/binary"
+while IFS= read -r -d '' f; do
+  [ -r "$f" ] && [ -s "$f" ] || continue
+  if ! grep -qI '' "$f"; then
+    rel="${f#"$DIR"/}"
+    sum="$(sha256sum "$f" | cut -d' ' -f1)"
+    grep -qxF "bin:$rel:$sum" "$EFF" || echo "$rel: [二进制，无法按文本扫描 sha256=$sum]" >> "$WORK_TMP/binary"
+  fi
+done < "$WORK_TMP/files"
+if [ -s "$WORK_TMP/binary" ]; then
+  say_fail "存在无法按文本扫描的文件（人工复核后以 bin:<相对路径>:<sha256> 登记 allowlist）："
+  head -5 "$WORK_TMP/binary"
+fi
 
 # collect: 运行一次 grep，结果落 RAW；GRC 保存退出码（0=有命中 1=无命中 >=2=出错）。
 collect() {
@@ -131,8 +156,8 @@ print_hits() {
   done < "$KEPT"
 }
 
-# 1. 绝密关键词：2027-02（硬红线，任何上下文都不行）
-collect -rIn --include='*.txt' -E '2027-0?2' "$DIR"
+# 1. 绝密关键词：2027-02（硬红线，任何上下文都不行；含 2027/02、2027.02、2027年2月、Feb 2027 等写法）
+collect -rIn -i -E '2027[-/.][[:space:]]*0?2|2027[[:space:]]*年[[:space:]]*0?2[[:space:]]*月|feb(ruary)?\.?[[:space:]]*2027' "$DIR"
 if [ "$GRC" -ge 2 ]; then
   scan_error "规则1（2027-02）" "$GRC"
 elif [ "$GRC" -eq 0 ]; then
@@ -143,24 +168,21 @@ elif [ "$GRC" -eq 0 ]; then
   fi
 fi
 
-# 2. 绝密/机密字样（排除文件头 Classification: Public 这类标注行）
-collect -rIn --include='*.txt' -E '绝密|机密|SECRET|TOP ?SECRET' "$DIR"
+# 2. 绝密/机密字样（不按 "classification" 整行豁免：标注为 TOP SECRET 的文件本身就该停发；
+#    "Classification: Public" 这类标注行本就不含这些字样，不受影响）
+collect -rIn -E '绝密|机密|SECRET' "$DIR"
 if [ "$GRC" -ge 2 ]; then
   scan_error "规则2（绝密/机密字样）" "$GRC"
 elif [ "$GRC" -eq 0 ]; then
-  if ! refilter -v -i 'classification'; then
-    scan_error "规则2（绝密/机密字样）" "$GRC"
-  else
-    apply_allowlist
-    if [ -s "$KEPT" ]; then
-      say_fail "命中 绝密/机密 字样（非 Classification 标注）："
-      print_hits redact
-    fi
+  apply_allowlist
+  if [ -s "$KEPT" ]; then
+    say_fail "命中 绝密/机密 字样："
+    print_hits redact
   fi
 fi
 
 # 3. 私钥块
-collect -rIn --include='*.txt' -E -- '-----BEGIN .*PRIVATE KEY-----' "$DIR"
+collect -rIn -E -- '-----BEGIN .*PRIVATE KEY-----' "$DIR"
 if [ "$GRC" -ge 2 ]; then
   scan_error "规则3（私钥块）" "$GRC"
 elif [ "$GRC" -eq 0 ]; then
@@ -169,8 +191,8 @@ elif [ "$GRC" -eq 0 ]; then
   print_hits redact
 fi
 
-# 4. 高置信 token 前缀（GitHub PAT / Stripe live / AWS / Slack）
-collect -rInE --include='*.txt' 'ghp_[A-Za-z0-9]{8,}|gho_[A-Za-z0-9]{8,}|sk_live_[A-Za-z0-9]{8,}|rk_live_[A-Za-z0-9]{8,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{8,}' "$DIR"
+# 4. 高置信 token 前缀（GitHub PAT/OAuth/App / Stripe live / AWS / Slack / Anthropic / Google API key）
+collect -rInE 'gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{35}|sk_live_[A-Za-z0-9]{8,}|rk_live_[A-Za-z0-9]{8,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{8,}' "$DIR"
 if [ "$GRC" -ge 2 ]; then
   scan_error "规则4（token）" "$GRC"
 elif [ "$GRC" -eq 0 ]; then
@@ -182,7 +204,7 @@ elif [ "$GRC" -eq 0 ]; then
 fi
 
 # 5. 口令赋值（疑似明文口令，WARN 级：可能是文档示例）
-collect -rIn --include='*.txt' -E -i '(password|passwd|pwd)\s*[:=]\s*["'"'"']?[^"'"'"' ]{6,}' "$DIR"
+collect -rIn -E -i '(password|passwd|pwd)\s*[:=]\s*["'"'"']?[^"'"'"' ]{6,}' "$DIR"
 if [ "$GRC" -ge 2 ]; then
   scan_error "规则5（口令赋值）" "$GRC"
 elif [ "$GRC" -eq 0 ]; then
@@ -198,7 +220,7 @@ elif [ "$GRC" -eq 0 ]; then
 fi
 
 # 6. 邮箱地址（WARN 级：公开文件原则上不出现个人邮箱）
-collect -rIno --include='*.txt' -E '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "$DIR"
+collect -rIno -E '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "$DIR"
 if [ "$GRC" -ge 2 ]; then
   scan_error "规则6（邮箱）" "$GRC"
 elif [ "$GRC" -eq 0 ]; then

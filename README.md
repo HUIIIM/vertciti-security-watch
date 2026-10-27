@@ -25,19 +25,19 @@ vertciti.com 每次生产发布前要过三道门禁，全部脚本化：敏感�
 
 | # | 门禁 / 工具 | 脚本 | 判定 |
 |---|---|---|---|
-| 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | FAIL：私钥 / `ghp_` 等 token / 绝密字样 / `2027-02`。WARN（人工复核）：口令赋值、邮箱地址。默认扫描生产 `data-room/` |
+| 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | 扫描目录内全部文件（不限 .txt）。FAIL：私钥 / `ghp_` 等 token / 绝密字样 / `2027-02` 及其各种写法 / 无法按文本扫描的文件（二进制、不可读）/ 目录为空。WARN（人工复核）：口令赋值、邮箱地址。命中默认脱敏输出（`路径:行号` + 掩码/指纹），不回显明文 |
 | 2 | 首页可访问 | `curl -sI https://vertciti.com/` | 非 200 即 FAIL（在部署任务内执行） |
-| 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕 |
+| 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕。页面返回非 2xx、出现 JS 报错或某条路由量不到任何可交互元素时也 FAIL |
 | — | 颜色审计 | `security-watch/color-audit.py` | 只读：提取首页内联 CSS 与 `style=` 中的全部色值并统计 |
 | — | box-shadow 审计 | `security-watch/shadow-audit.py` | 只读：列出首页每条 box-shadow 声明的选择器、行号与取值 |
-| — | allowlist | `security-watch/gate-allowlist.txt` | 门禁 1 的误报在这里登记：按 `文件:行号:精确内容`（或 `fp:` 指纹）逐实例登记，子串匹配已废止；部署侧登记为准，仓内文件为空占位；审计产物归档在 `security-watch/archive/` |
+| — | allowlist | `security-watch/gate-allowlist.txt` | 门禁 1 的误报在这里登记：按 `文件:行号:精确内容`（或 `fp:` 指纹）逐实例登记，二进制文件以 `bin:路径:sha256` 登记，子串匹配已废止；部署侧登记为准，仓内文件只有格式说明；审计产物归档在 `security-watch/archive/` |
 
 ## 快速开始
 
 ```bash
 cd vertciti-security-watch
 bash security-watch/data-room-gate.sh --help        # 看门禁 1 的 FAIL/WARN 规则
-bash security-watch/data-room-gate.sh ./data-room   # 扫一个目录（默认扫生产 data-room）
+bash security-watch/data-room-gate.sh ./data-room   # 扫一个目录（也可经环境变量 DATA_ROOM_DIR 指定）
 ```
 
 ```bash
@@ -88,7 +88,11 @@ vertciti-security-watch/
   unreadable allowlist fails closed instead of silently skipping checks. Entries match exactly
   (`file:line:exact content` or `fp:` fingerprints); substring matching was abolished, and zero
   scannable files fails instead of passing vacuously (2026-10-26, issue #6).
-- 审计脚本与门禁 3 的解释器/目标路径经环境变量显式指定（无内置默认）；浏览器路径 `/opt/meta-chromium/chrome` 绑定维护者本机。
+- 门禁 1 扫描全部文件（不限 .txt），但不解析 PDF/DOCX 等二进制文件：这类文件一律 FAIL，人工复核后以
+  `bin:<相对路径>:<sha256(文件)>` 登记放行，文件变化后条目失效（issue #5）。
+  Gate 1 scans every file but does not parse binaries (PDF/DOCX/…): they fail until reviewed and
+  allowlisted as `bin:<path>:<sha256>`, an entry that goes stale when the file changes (issue #5).
+- 审计脚本与门禁 3 的解释器/目标路径经环境变量显式指定（无内置默认）；门禁 3 的浏览器默认 `/opt/meta-chromium/chrome`，可经 `TOUCH_TARGET_CHROME` 覆盖。
 
 更多见 [docs/PRODUCT.md](docs/PRODUCT.md)。
 
