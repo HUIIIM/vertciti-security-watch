@@ -48,7 +48,7 @@ curl -sI https://vertciti.com/ | head -1                   # 门禁 2：首页 2
 开发检查：
 
 ```bash
-pip install pytest ruff
+pip install --require-hashes -r requirements-dev.txt   # 与 CI 同一份哈希锁定的工具版本
 ruff check .          # lint（规则见 ruff.toml）
 python3 -m pytest -q  # 冒烟测试
 ```
