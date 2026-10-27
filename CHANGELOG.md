@@ -10,9 +10,10 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- 门禁 1 模式集双层化（GC-20261027-002）：六规则模式串移出脚本本体——仓内只留结构骨架 `gate-patterns-skeleton.txt`（真合成模式、非完整门禁），全量模式集存部署侧私有面，约束性运行前验 sha256 指纹、不符 fail-closed；判据内容不变。受保护字面量（规则 1 日期全变体、规则 2 三词）全仓归零（含注释、测试、fixtures 与文档）/ gate 1 pattern set split into two tiers (in-repo synthetic skeleton + deployment-side full set, sha256 fingerprint verified before binding runs, fail-closed on mismatch); detection criteria unchanged.
 - 门禁 1 `data-room-gate.sh` 覆盖面补强，见独立评估 #5（在 #6 的 fail-closed / 精确 allowlist / 脱敏输出之上）/ gate 1 coverage fixes (assessment #5, on top of #6):
   扫描全部文件而非只扫 `*.txt`；二进制文件改为 FAIL，人工复核后以 `bin:<相对路径>:<sha256>` 登记放行；
-  不再按 "classification" 整行豁免绝密字样；增加 `2027/02`、`2027年2月`、`Feb 2027` 等写法与
+  不再按 "classification" 整行豁免规则 2 字样；规则 1 增加多种日期写法（分隔符/中文年月/英文月份名变体）与
   `github_pat_`、`ghs_/ghu_/ghr_`、`sk-ant-`、`AIza` token。
 - 门禁 3 `touch-target-check.sh`：页面非 2xx、JS 报错或路由量不到任何可交互元素时 FAIL（原来空白页/错误页也报 PASS）；
   浏览器路径可经 `TOUCH_TARGET_CHROME` 覆盖 / gate 3 fails on non-2xx, JS errors and empty routes.

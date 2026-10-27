@@ -83,18 +83,23 @@ def test_shadow_parse_rules_tracks_media() -> None:
 # ---- data-room-gate.sh ----
 
 def _run_gate(
-    tmp_path: Path, data_dir: Path, allowlist: str | None = ""
+    tmp_path: Path,
+    data_dir: Path,
+    allowlist: str | None = "",
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a copy of the gate whose sibling allowlist holds `allowlist`.
 
-    The gate resolves its allowlist next to the script, so each test gets its own
-    copy instead of touching the committed security-watch/gate-allowlist.txt.
-    allowlist=None means the allowlist file exists but is unreadable.
+    The gate resolves its allowlist and its skeleton pattern set next to the
+    script, so each test gets its own copies instead of touching the committed
+    security-watch files. allowlist=None means the allowlist file exists but is
+    unreadable. env entries are merged over os.environ (pattern-set loading).
     """
     gate_dir = tmp_path / "gate"
     gate_dir.mkdir(exist_ok=True)
     script = gate_dir / "data-room-gate.sh"
     shutil.copy(SW / "data-room-gate.sh", script)
+    shutil.copy(SW / "gate-patterns-skeleton.txt", gate_dir / "gate-patterns-skeleton.txt")
     al = gate_dir / "gate-allowlist.txt"
     al.write_text(allowlist or "", encoding="utf-8")
     if allowlist is None:
@@ -102,6 +107,7 @@ def _run_gate(
     return subprocess.run(
         ["bash", str(script), str(data_dir)],
         capture_output=True, text=True, check=False,
+        env={**os.environ, **(env or {})},
     )
 
 
@@ -150,7 +156,7 @@ def test_gate_fails_on_missing_dir(tmp_path: Path) -> None:
 @needs_bash
 @not_root
 def test_gate_fails_closed_on_unreadable_allowlist(tmp_path: Path) -> None:
-    data = _data(tmp_path, {"a.txt": "TOP SECRET\n"})
+    data = _data(tmp_path, {"a.txt": "PLACEHOLDERWORD\n"})
     res = _run_gate(tmp_path, data, allowlist=None)
     assert res.returncode == 1
     assert "不可读" in res.stdout
@@ -158,26 +164,26 @@ def test_gate_fails_closed_on_unreadable_allowlist(tmp_path: Path) -> None:
 
 @needs_bash
 def test_gate_blank_allowlist_line_does_not_exempt_everything(tmp_path: Path) -> None:
-    data = _data(tmp_path, {"a.txt": "TOP SECRET\n"})
+    data = _data(tmp_path, {"a.txt": "PLACEHOLDERWORD\n"})
     res = _run_gate(tmp_path, data, allowlist="foo\n\n   \n")
     assert res.returncode == 1, res.stdout
 
 
 @needs_bash
 def test_gate_allowlist_needs_exact_path_and_line(tmp_path: Path) -> None:
-    data = _data(tmp_path, {"notes.txt": "ok\nTOP SECRET\n"})
+    data = _data(tmp_path, {"notes.txt": "ok\nPLACEHOLDERWORD\n"})
     # a bare file name (old substring semantics) or the wrong line exempts nothing
     assert _run_gate(tmp_path, data, allowlist="notes.txt\n").returncode == 1
     assert _run_gate(tmp_path, data, allowlist="notes.txt:2\n").returncode == 1
-    assert _run_gate(tmp_path, data, allowlist="notes.txt:1:TOP SECRET\n").returncode == 1
-    res = _run_gate(tmp_path, data, allowlist="# reviewed\nnotes.txt:2:TOP SECRET\n")
+    assert _run_gate(tmp_path, data, allowlist="notes.txt:1:PLACEHOLDERWORD\n").returncode == 1
+    res = _run_gate(tmp_path, data, allowlist="# reviewed\nnotes.txt:2:PLACEHOLDERWORD\n")
     assert res.returncode == 0, res.stdout
 
 
 @needs_bash
 @pytest.mark.parametrize("name", ["a.md", "b.json", "c.html", "d.csv", "nested/e"])
 def test_gate_scans_non_txt_files(tmp_path: Path, name: str) -> None:
-    res = _run_gate(tmp_path, _data(tmp_path, {name: "TOP SECRET\n"}))
+    res = _run_gate(tmp_path, _data(tmp_path, {name: "PLACEHOLDERWORD\n"}))
     assert res.returncode == 1, res.stdout
 
 
@@ -213,7 +219,7 @@ def test_gate_binary_file_fails_until_reviewed(tmp_path: Path) -> None:
 @needs_bash
 @not_root
 def test_gate_unreadable_file_fails(tmp_path: Path) -> None:
-    data = _data(tmp_path, {"a.txt": CLEAN, "b.txt": "TOP SECRET\n"})
+    data = _data(tmp_path, {"a.txt": CLEAN, "b.txt": "PLACEHOLDERWORD\n"})
     (data / "b.txt").chmod(0)
     res = _run_gate(tmp_path, data)
     assert res.returncode == 1
@@ -222,14 +228,7 @@ def test_gate_unreadable_file_fails(tmp_path: Path) -> None:
 
 @needs_bash
 @pytest.mark.parametrize("line", [
-    "Classification: TOP SECRET",
-    "launch 2027-02",
-    "launch 2027/02",
-    "launch 2027.2",
-    "launch 2027年2月",
-    "launch Feb 2027",
-    "launch February 2027",
-    "github_pat_11ABCDEFG0123456789_abcdefghij",
+        "github_pat_11ABCDEFG0123456789_abcdefghij",
     "ghs_" + "a" * 20,
     "sk-ant-api03-" + "A" * 12,
 ])
@@ -239,8 +238,111 @@ def test_gate_detection_variants(tmp_path: Path, line: str) -> None:
 
 
 @needs_bash
+@pytest.mark.parametrize("line", [
+    "launch 1955-11",
+    "launch 1955/11",
+    "launch 1955.11",
+    "launch 1955年11月",
+    "launch Nov 1955",
+    "launch November 1955",
+    "Classification: PLACEHOLDERWORD",
+])
+def test_gate_skeleton_detection_variants(tmp_path: Path, line: str) -> None:
+    # The committed pattern set is a synthetic skeleton (two-tier form): these
+    # variants exercise the same shapes the deployment-side full set enforces.
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": line + "\n"}))
+    assert res.returncode == 1, res.stdout
+    assert "非约束性" in res.stdout
+
+
+def _full_pattern_set(tmp_path: Path) -> tuple[Path, str]:
+    """Build a test-local full pattern set from the skeleton.
+
+    Rules 1 and 2 are swapped for test-local synthetic values, so the loader
+    and fingerprint paths run end to end without any production pattern.
+    """
+    text = (SW / "gate-patterns-skeleton.txt").read_text(encoding="utf-8")
+    lines = []
+    for ln in text.splitlines():
+        if ln.startswith("1.pattern "):
+            ln = ("1.pattern 2031[-/.][[:space:]]*0?7|2031[[:space:]]*年"
+                  "[[:space:]]*0?7[[:space:]]*月|jul(y)?\\.?[[:space:]]*2031")
+        elif ln.startswith("2.pattern "):
+            ln = "2.pattern TESTSTOPWORD"
+        lines.append(ln)
+    pf = tmp_path / "patterns-full.txt"
+    pf.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return pf, hashlib.sha256(pf.read_bytes()).hexdigest()
+
+
+@needs_bash
+@pytest.mark.parametrize("line", [
+    "launch 2031-07",
+    "launch 2031/07",
+    "launch 2031.7",
+    "launch 2031年7月",
+    "launch Jul 2031",
+    "launch July 2031",
+    "Classification: TESTSTOPWORD",
+])
+def test_gate_full_set_detection_variants(tmp_path: Path, line: str) -> None:
+    pf, fp = _full_pattern_set(tmp_path)
+    env = {"GATE_PATTERN_FILE": str(pf), "GATE_PATTERN_SHA256": fp}
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": line + "\n"}), env=env)
+    assert res.returncode == 1, res.stdout
+    assert "指纹验真通过" in res.stdout
+
+
+@needs_bash
+def test_gate_full_set_clean_dir_passes(tmp_path: Path) -> None:
+    pf, fp = _full_pattern_set(tmp_path)
+    env = {"GATE_PATTERN_FILE": str(pf), "GATE_PATTERN_SHA256": fp}
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}), env=env)
+    assert res.returncode == 0, res.stdout
+    assert "结果：PASS" in res.stdout
+
+
+@needs_bash
+def test_gate_full_set_fingerprint_via_file(tmp_path: Path) -> None:
+    pf, fp = _full_pattern_set(tmp_path)
+    fp_file = tmp_path / "patterns.sha256"
+    fp_file.write_text(fp + "\n", encoding="utf-8")
+    env = {"GATE_PATTERN_FILE": str(pf), "GATE_PATTERN_FP_FILE": str(fp_file)}
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}), env=env)
+    assert res.returncode == 0, res.stdout
+    assert "指纹验真通过" in res.stdout
+
+
+@needs_bash
+def test_gate_full_set_wrong_fingerprint_fails_closed(tmp_path: Path) -> None:
+    pf, _fp = _full_pattern_set(tmp_path)
+    env = {"GATE_PATTERN_FILE": str(pf), "GATE_PATTERN_SHA256": "0" * 64}
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}), env=env)
+    assert res.returncode == 1
+    assert "指纹不符" in res.stdout
+
+
+@needs_bash
+def test_gate_full_set_without_fingerprint_fails_closed(tmp_path: Path) -> None:
+    pf, _fp = _full_pattern_set(tmp_path)
+    env = {"GATE_PATTERN_FILE": str(pf)}
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}), env=env)
+    assert res.returncode == 1
+    assert "未提供登记指纹" in res.stdout
+
+
+@needs_bash
+def test_gate_pattern_file_missing_fails_closed(tmp_path: Path) -> None:
+    env = {"GATE_PATTERN_FILE": str(tmp_path / "nope.txt"),
+           "GATE_PATTERN_SHA256": "0" * 64}
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}), env=env)
+    assert res.returncode == 1
+    assert "模式集缺失或不可读" in res.stdout
+
+
+@needs_bash
 def test_gate_reports_location_not_content(tmp_path: Path) -> None:
-    data = _data(tmp_path, {"a.txt": "db password=Hunter2SuperSecretValue\nTOP SECRET plan\n"})
+    data = _data(tmp_path, {"a.txt": "db password=Hunter2SuperSecretValue\nPLACEHOLDERWORD plan\n"})
     res = _run_gate(tmp_path, data)
     assert res.returncode == 1
     assert "a.txt:1" in res.stdout and "a.txt:2" in res.stdout
@@ -274,6 +376,7 @@ def _run_gate_copy(
     gate_dir = base / "gate"
     gate_dir.mkdir(parents=True)
     shutil.copy(SW / "data-room-gate.sh", gate_dir / "data-room-gate.sh")
+    shutil.copy(SW / "gate-patterns-skeleton.txt", gate_dir / "gate-patterns-skeleton.txt")
     if allowlist is not None:
         (gate_dir / "gate-allowlist.txt").write_text(allowlist, encoding="utf-8")
     data = base / "data-room"

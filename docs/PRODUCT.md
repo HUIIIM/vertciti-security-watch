@@ -8,8 +8,8 @@ vertciti 维护者在 vertciti.com 发布前运行这组脚本，对 data-room �
 The vertciti maintainer runs these scripts before a vertciti.com release to gate on data-room secrets, homepage availability and 390px touch targets; any FAIL stops the release.
 
 ## 解决什么问题 / Problem
-- 痛点 / Pain：官网发布前需要确认公开的 data-room 不含私钥、token、绝密字样或 `2027-02` 相关内容，且移动端触控目标不小于 44px。发布频率与历史事故代价：未确认（TBD）。
-  Before publishing, the public data-room must not contain private keys, tokens, classified markers or `2027-02` content, and mobile touch targets must be at least 44px. Release frequency and cost of past incidents: TBD.
+- 痛点 / Pain：官网发布前需要确认公开的 data-room 不含私钥、token、规则 2 停发字样或规则 1（封存日期）相关内容，且移动端触控目标不小于 44px。发布频率与历史事故代价：未确认（TBD）。
+  Before publishing, the public data-room must not contain private keys, tokens, rule-2 stop markers or rule-1 (sealed-date) content, and mobile touch targets must be at least 44px. Release frequency and cost of past incidents: TBD.
 - 现在的替代做法 / Current alternative：人工逐文件检查或依赖通用扫描器；本仓库把规则写成脚本，FAIL 时 exit 1。是否优于其他做法：未确认（TBD），无对比数据。
   Manual review or generic scanners; this repo encodes the rules as scripts that exit 1 on FAIL. No comparison data exists.
 
@@ -28,7 +28,7 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
 ## 为什么是我们（差异化）/ Differentiation
 | 维度 / Dimension | 本仓库 / This repo | 常见替代 / Common alternative |
 |---|---|---|
-| 规则来源 / Rules | 针对 vertciti data-room 的定制规则（如 `2027-02` 硬红线） / custom rules for the vertciti data-room | 通用密钥规则 / generic secret patterns |
+| 规则来源 / Rules | 针对 vertciti data-room 的定制规则（如规则 1 封存日期硬红线） / custom rules for the vertciti data-room | 通用密钥规则 / generic secret patterns |
 | 误报处理 / False positives | 在 allowlist 文件登记，不改扫描规则 / registered in an allowlist file | 视工具而定 / tool-dependent |
 | 与其他方案的效果对比 / Measured comparison | 未确认（TBD） | 未确认（TBD） |
 
@@ -42,7 +42,7 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
 ## 边界与风险 / Scope and risks
 - 不做 / Does not：不自动修改生产文件、不改防火墙、不向外推送（见 README"诚实约定"）。
 - 已知限制 / Known limitations：
-  - `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发，缺失/不可读时 fail-closed 停发；条目为精确匹配（`文件:行号:精确内容` 或 `fp:` 指纹），子串匹配已废止；可扫描文件数为 0 时 FAIL，不真空通过（2026-10-26，issue #6）。早期版本曾固定为维护者本机绝对路径——该目录不存在时 `grep -f` 报错被管道吞掉，FAIL/WARN 检查（`2027-02`、绝密字样、token、口令、邮箱）会被跳过并输出 PASS（2026-10-22 本地复现，已修复）。私钥块检查不受影响。
+  - `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发，缺失/不可读时 fail-closed 停发；条目为精确匹配（`文件:行号:精确内容` 或 `fp:` 指纹），子串匹配已废止；可扫描文件数为 0 时 FAIL，不真空通过（2026-10-26，issue #6）。早期版本曾固定为维护者本机绝对路径——该目录不存在时 `grep -f` 报错被管道吞掉，FAIL/WARN 检查（规则 1、规则 2、token、口令、邮箱）会被跳过并输出 PASS（2026-10-22 本地复现，已修复）。私钥块检查不受影响。
     The allowlist now resolves relative to the script's own directory and ships with it; a missing or unreadable allowlist fails closed. Entries match exactly (`file:line:exact content` or `fp:` fingerprints); substring matching was abolished, and zero scannable files fails instead of passing vacuously (2026-10-26, issue #6). An earlier version used a fixed maintainer-machine absolute path, and a missing directory silently skipped most checks and reported PASS (reproduced locally 2026-10-22; fixed). The private-key check was unaffected.
   - 只扫描 `*.txt` 文件 / Only `*.txt` files are scanned.
   - `shadow-audit.py` 输入路径须经位置参数或环境变量 `SHADOW_AUDIT_SRC` 显式传入，无内置默认目标（早期版本曾硬编码维护者本机生产源路径，已参数化）。

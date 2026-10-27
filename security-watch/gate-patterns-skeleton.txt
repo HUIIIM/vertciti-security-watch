@@ -1,0 +1,18 @@
+# data-room gate 模式集 —— 仓内骨架（双层形态，GC-20261027-002）
+#
+# 本文件是结构骨架：六条规则的编号、级别、引擎（grep -E）与形态在仓，
+# 模式为真合成占位，仅供结构测试与非约束性运行。它不是完整门禁：
+# 规则 1、规则 2 的具约束力模式不在公开仓，存放于部署侧全量模式集，
+# 发布运行经 GATE_PATTERN_FILE 装载并先验 sha256 指纹（见 data-room-gate.sh）。
+# 规则 3-6 的模式为公开行业标准形态，与全量集同文。
+#
+# 行格式：<规则>.<字段> <模式（至行尾）>
+#   字段 pattern＝检测模式（grep -E）；exclude＝规则自带的内容排除（仅规则 5）。
+# 骨架只在规则结构变化时同步；全量集的更新纪律见部署侧说明。
+1.pattern 1955[-/.][[:space:]]*1?1|1955[[:space:]]*年[[:space:]]*1?1[[:space:]]*月|nov(ember)?\.?[[:space:]]*1955
+2.pattern 占位词甲|占位词乙|PLACEHOLDERWORD
+3.pattern -----BEGIN .*PRIVATE KEY-----
+4.pattern gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{35}|sk_live_[A-Za-z0-9]{8,}|rk_live_[A-Za-z0-9]{8,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{8,}
+5.pattern (password|passwd|pwd)\s*[:=]\s*["']?[^"' ]{6,}
+5.exclude password (requirement|policy|must|should)|your password|no password|passwordless
+6.pattern [A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}
