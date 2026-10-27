@@ -3,7 +3,9 @@
 ## Reporting a vulnerability
 
 Please **do not** open a public issue for security vulnerabilities.
-Email the maintainer directly with:
+Report them privately through GitHub's private vulnerability reporting:
+[Security → Report a vulnerability](https://github.com/HUIIIM/vertciti-security-watch/security/advisories/new).
+Include:
 
 - a description of the vulnerability,
 - steps to reproduce,
