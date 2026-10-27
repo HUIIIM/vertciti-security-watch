@@ -5,10 +5,12 @@ production paths. Python scripts are loaded by file path because their file
 names contain hyphens.
 """
 
+import hashlib
 import importlib.util
 import os
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -151,7 +153,7 @@ def test_gate_fails_closed_on_unreadable_allowlist(tmp_path: Path) -> None:
     data = _data(tmp_path, {"a.txt": "TOP SECRET\n"})
     res = _run_gate(tmp_path, data, allowlist=None)
     assert res.returncode == 1
-    assert "allowlist 不可读" in res.stdout
+    assert "不可读" in res.stdout
 
 
 @needs_bash
@@ -166,8 +168,9 @@ def test_gate_allowlist_needs_exact_path_and_line(tmp_path: Path) -> None:
     data = _data(tmp_path, {"notes.txt": "ok\nTOP SECRET\n"})
     # a bare file name (old substring semantics) or the wrong line exempts nothing
     assert _run_gate(tmp_path, data, allowlist="notes.txt\n").returncode == 1
-    assert _run_gate(tmp_path, data, allowlist="notes.txt:1\n").returncode == 1
-    res = _run_gate(tmp_path, data, allowlist="# reviewed\nnotes.txt:2\n")
+    assert _run_gate(tmp_path, data, allowlist="notes.txt:2\n").returncode == 1
+    assert _run_gate(tmp_path, data, allowlist="notes.txt:1:TOP SECRET\n").returncode == 1
+    res = _run_gate(tmp_path, data, allowlist="# reviewed\nnotes.txt:2:TOP SECRET\n")
     assert res.returncode == 0, res.stdout
 
 
@@ -180,8 +183,9 @@ def test_gate_scans_non_txt_files(tmp_path: Path, name: str) -> None:
 
 @needs_bash
 def test_gate_private_key_in_pem_fails(tmp_path: Path) -> None:
-    data = _data(tmp_path, {"k.pem": "-----BEGIN RSA PRIVATE KEY-----\n"})
-    res = _run_gate(tmp_path, data, allowlist="k.pem:*\n")  # not allowlistable
+    key = "-----BEGIN RSA PRIVATE KEY-----"
+    data = _data(tmp_path, {"k.pem": key + "\n"})
+    res = _run_gate(tmp_path, data, allowlist="k.pem:1:" + key + "\n")  # not allowlistable
     assert res.returncode == 1
     assert "私钥块" in res.stdout
 
@@ -190,7 +194,7 @@ def test_gate_private_key_in_pem_fails(tmp_path: Path) -> None:
 def test_gate_fails_on_empty_dir(tmp_path: Path) -> None:
     res = _run_gate(tmp_path, _data(tmp_path, {}))
     assert res.returncode == 1
-    assert "扫描文件数：0" in res.stdout
+    assert "文件数为 0" in res.stdout
 
 
 @needs_bash
@@ -198,8 +202,12 @@ def test_gate_binary_file_fails_until_reviewed(tmp_path: Path) -> None:
     data = _data(tmp_path, {"a.txt": CLEAN, "x.pdf": b"%PDF-1.4\x00\x01binary"})
     res = _run_gate(tmp_path, data)
     assert res.returncode == 1
-    assert "x.pdf:二进制" in res.stdout
-    assert _run_gate(tmp_path, data, allowlist="x.pdf:*\n").returncode == 0
+    assert "x.pdf: [二进制" in res.stdout
+    digest = hashlib.sha256((data / "x.pdf").read_bytes()).hexdigest()
+    assert _run_gate(tmp_path, data, allowlist="bin:x.pdf:" + digest + "\n").returncode == 0
+    # the entry is bound to the file's content: any edit makes it stale
+    (data / "x.pdf").write_bytes(b"%PDF-1.4\x00\x02changed")
+    assert _run_gate(tmp_path, data, allowlist="bin:x.pdf:" + digest + "\n").returncode == 1
 
 
 @needs_bash
@@ -209,7 +217,7 @@ def test_gate_unreadable_file_fails(tmp_path: Path) -> None:
     (data / "b.txt").chmod(0)
     res = _run_gate(tmp_path, data)
     assert res.returncode == 1
-    assert "b.txt:不可读" in res.stdout
+    assert "扫描过程出错" in res.stdout
 
 
 @needs_bash
@@ -256,3 +264,81 @@ def test_color_audit_json_flag_without_path_is_usage_error(tmp_path: Path) -> No
     )
     assert res.returncode == 1
     assert "Traceback" not in res.stderr
+# ---- data-room-gate.sh fail-closed regressions (issue #6) ----
+
+def _run_gate_copy(
+    tmp_path: Path, allowlist: str | None, files: dict[str, str]
+) -> subprocess.CompletedProcess:
+    """Run a scratch copy of the gate whose allowlist sits beside the script."""
+    base = tmp_path / ("run-" + uuid.uuid4().hex[:8])
+    gate_dir = base / "gate"
+    gate_dir.mkdir(parents=True)
+    shutil.copy(SW / "data-room-gate.sh", gate_dir / "data-room-gate.sh")
+    if allowlist is not None:
+        (gate_dir / "gate-allowlist.txt").write_text(allowlist, encoding="utf-8")
+    data = base / "data-room"
+    data.mkdir()
+    for name, text in files.items():
+        (data / name).write_text(text, encoding="utf-8")
+    env = {**os.environ, "TMPDIR": str(base)}
+    return subprocess.run(
+        ["bash", str(gate_dir / "data-room-gate.sh"), str(data)],
+        capture_output=True, text=True, env=env, check=False,
+    )
+
+
+@needs_bash
+def test_gate_fails_when_allowlist_missing(tmp_path: Path) -> None:
+    res = _run_gate_copy(tmp_path, None, {"a.txt": "hello\n"})
+    assert res.returncode == 1
+    assert "allowlist" in res.stdout
+
+
+@needs_bash
+def test_gate_fails_when_no_txt_files(tmp_path: Path) -> None:
+    # issue #5: non-.txt files are scanned now, so the token itself is caught
+    res = _run_gate_copy(tmp_path, "", {"secret.md": "ghp_" + "y" * 30 + "\n"})
+    assert res.returncode == 1
+    assert "命中疑似密钥 token" in res.stdout
+
+
+@needs_bash
+def test_gate_blank_allowlist_lines_do_not_suppress(tmp_path: Path) -> None:
+    res = _run_gate_copy(
+        tmp_path, "\n   \n# comment\n", {"a.txt": "key ghp_" + "x" * 30 + "\n"}
+    )
+    assert res.returncode == 1
+    assert "GATE FAIL" in res.stdout
+
+
+@needs_bash
+def test_gate_substring_allowlist_entry_does_not_suppress(tmp_path: Path) -> None:
+    res = _run_gate_copy(tmp_path, "t\n", {"a.txt": "key ghp_" + "x" * 30 + "\n"})
+    assert res.returncode == 1
+    assert "GATE FAIL" in res.stdout
+
+
+@needs_bash
+def test_gate_exact_allowlist_entry_suppresses_only_its_instance(
+    tmp_path: Path,
+) -> None:
+    line = "key ghp_" + "x" * 30
+    entry = "a.txt:1:" + line + "\n"
+    res = _run_gate_copy(tmp_path, entry, {"a.txt": line + "\n"})
+    assert res.returncode == 0, res.stdout
+    assert "结果：PASS" in res.stdout
+    res2 = _run_gate_copy(
+        tmp_path, entry, {"a.txt": line + "\n", "b.txt": line + "\n"}
+    )
+    assert res2.returncode == 1
+    assert "b.txt" in res2.stdout
+
+
+@needs_bash
+def test_gate_redacts_password_value(tmp_path: Path) -> None:
+    secret = "Sup3rSecretValue"
+    res = _run_gate_copy(tmp_path, "", {"a.txt": "db password = " + secret + "\n"})
+    assert res.returncode == 0, res.stdout
+    assert "GATE WARN" in res.stdout
+    assert secret not in res.stdout
+    assert secret not in res.stderr

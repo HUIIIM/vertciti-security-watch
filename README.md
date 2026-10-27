@@ -12,7 +12,7 @@ vertciti.com 生产发布前运行的三道发布门禁脚本（敏感信息扫�
 | 语言 | 简体中文（安全、许可证段落附英文） |
 | 联系 | 安全漏洞：[.github/SECURITY.md](.github/SECURITY.md) · 产品：[vertciti.com](https://vertciti.com) |
 
-演示录屏（本机真实运行：门禁 1 通过 → 门禁 3 通过 → 混入假密钥后 FAIL 停发）、架构图和门禁运行截图在
+演示录屏（示意演示：门禁 1 通过 → 门禁 3 通过 → 混入假密钥后 FAIL 停发；该 GIF 与截图为合成示意图、非真实运行录制，真实录屏待重录）、架构图和门禁运行截图在
 [docs/assets](docs/assets)；仓库已公开，演示图以链接形式给出、不内嵌。演示用的是假密钥（`ghp_fake…`），不含任何真实凭证。
 
 ## 概览
@@ -25,12 +25,12 @@ vertciti.com 每次生产发布前要过三道门禁，全部脚本化：敏感�
 
 | # | 门禁 / 工具 | 脚本 | 判定 |
 |---|---|---|---|
-| 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | 扫描目录内全部文件（不限 .txt）。FAIL：私钥 / `ghp_` 等 token / 绝密字样 / `2027-02` 及其各种写法 / 无法按文本扫描的文件（二进制、不可读）/ 目录为空。WARN（人工复核）：口令赋值、邮箱地址。命中只报 `路径:行号`，不回显内容 |
+| 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | 扫描目录内全部文件（不限 .txt）。FAIL：私钥 / `ghp_` 等 token / 绝密字样 / `2027-02` 及其各种写法 / 无法按文本扫描的文件（二进制、不可读）/ 目录为空。WARN（人工复核）：口令赋值、邮箱地址。命中默认脱敏输出（`路径:行号` + 掩码/指纹），不回显明文 |
 | 2 | 首页可访问 | `curl -sI https://vertciti.com/` | 非 200 即 FAIL（在部署任务内执行） |
 | 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕。页面返回非 2xx、出现 JS 报错或某条路由量不到任何可交互元素时也 FAIL |
 | — | 颜色审计 | `security-watch/color-audit.py` | 只读：提取首页内联 CSS 与 `style=` 中的全部色值并统计 |
 | — | box-shadow 审计 | `security-watch/shadow-audit.py` | 只读：列出首页每条 box-shadow 声明的选择器、行号与取值 |
-| — | allowlist | `security-watch/gate-allowlist.txt` | 门禁 1 的误报在这里登记，格式 `相对路径:行号` 或 `相对路径:*`（整文件），精确比对；审计产物归档在 `security-watch/archive/` |
+| — | allowlist | `security-watch/gate-allowlist.txt` | 门禁 1 的误报在这里登记：按 `文件:行号:精确内容`（或 `fp:` 指纹）逐实例登记，二进制文件以 `bin:路径:sha256` 登记，子串匹配已废止；部署侧登记为准，仓内文件只有格式说明；审计产物归档在 `security-watch/archive/` |
 
 ## 快速开始
 
@@ -81,13 +81,18 @@ vertciti-security-watch/
 内部工具，维护中，尚无带版本号的发布；变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 已知限制：
-- `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发；不可读时 fail-closed 停发，
-  不再静默跳过检查（早期固定机器专属绝对路径、不可达时假过 PASS 的问题已修复）。
-  The allowlist resolves relative to the script's own directory and ships with it; an unreadable
-  allowlist fails closed instead of silently skipping checks.
+- `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发；缺失/不可读时 fail-closed 停发，
+  不再静默跳过检查（早期固定机器专属绝对路径、不可达时假过 PASS 的问题已修复）。条目为精确匹配
+  （`文件:行号:精确内容` 或 `fp:` 指纹），子串匹配已废止；可扫描文件数为 0 时 FAIL（2026-10-26，issue #6）。
+  The allowlist resolves relative to the script's own directory and ships with it; a missing or
+  unreadable allowlist fails closed instead of silently skipping checks. Entries match exactly
+  (`file:line:exact content` or `fp:` fingerprints); substring matching was abolished, and zero
+  scannable files fails instead of passing vacuously (2026-10-26, issue #6).
+- 门禁 1 扫描全部文件（不限 .txt），但不解析 PDF/DOCX 等二进制文件：这类文件一律 FAIL，人工复核后以
+  `bin:<相对路径>:<sha256(文件)>` 登记放行，文件变化后条目失效（issue #5）。
+  Gate 1 scans every file but does not parse binaries (PDF/DOCX/…): they fail until reviewed and
+  allowlisted as `bin:<path>:<sha256>`, an entry that goes stale when the file changes (issue #5).
 - 审计脚本与门禁 3 的解释器/目标路径经环境变量显式指定（无内置默认）；门禁 3 的浏览器默认 `/opt/meta-chromium/chrome`，可经 `TOUCH_TARGET_CHROME` 覆盖。
-- 门禁 1 不解析 PDF/DOCX 等二进制文件：这类文件一律 FAIL，人工复核后以 `路径:*` 登记 allowlist 放行。
-  Gate 1 does not parse binary files (PDF/DOCX/…): they fail until reviewed and allowlisted as `path:*`.
 
 更多见 [docs/PRODUCT.md](docs/PRODUCT.md)。
 

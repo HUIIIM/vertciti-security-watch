@@ -8,6 +8,6 @@
 | 2 | `curl -sI https://vertciti.com/` | 部署后验证首页 HTTP 200（门禁 2 在部署任务内执行）。 |
 | 3 | `bash ../qa-gates/touch-target-check.sh [--help] [URL]` | 390px 触控目标检查（WCAG 2.5.8，<44px 违规；非 2xx、JS 报错、空路由也 FAIL）。 |
 
-- `gate-allowlist.txt`：门禁 1 的放行白名单（误报在此登记；格式 `相对路径:行号` 或 `相对路径:*`，精确比对，见文件头）。
+- `gate-allowlist.txt`：门禁 1 的放行白名单（误报在此登记；格式 `相对路径:行号:精确内容`、`fp:<sha256>` 或二进制文件的 `bin:相对路径:<sha256>`，精确比对，见文件头）。
 - `color-audit.py` / `shadow-audit.py`：只读审计脚本，分别统计首页内联 CSS 的色值、列出 box-shadow 声明（不计算对比度）。
 - `archive/`：历史审计产物归档（不与脚本混放）。
