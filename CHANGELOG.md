@@ -10,6 +10,7 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- 门禁 1 骨架运行不再以 PASS/exit 0 结束（独立评估 #5 复核发现的新失效开放）：未设 `GATE_PATTERN_FILE` 时规则 1/2 是合成占位，真实封存内容不会命中，原先却照常 exit 0；按 README 快速开始原样运行即可复现。现无 FAIL 时 exit 3（NON-BINDING），`GATE_ALLOW_SKELETON=1` 仅供本地/测试恢复 0 / skeleton runs exit 3 instead of passing.
 - 门禁 1 模式集双层化（GC-20261027-002）：六规则模式串移出脚本本体——仓内只留结构骨架 `gate-patterns-skeleton.txt`（真合成模式、非完整门禁），全量模式集存部署侧私有面，约束性运行前验 sha256 指纹、不符 fail-closed；判据内容不变。受保护字面量（规则 1 日期全变体、规则 2 三词）全仓归零（含注释、测试、fixtures 与文档）/ gate 1 pattern set split into two tiers (in-repo synthetic skeleton + deployment-side full set, sha256 fingerprint verified before binding runs, fail-closed on mismatch); detection criteria unchanged.
 - 门禁 1 `data-room-gate.sh` 覆盖面补强，见独立评估 #5（在 #6 的 fail-closed / 精确 allowlist / 脱敏输出之上）/ gate 1 coverage fixes (assessment #5, on top of #6):
   扫描全部文件而非只扫 `*.txt`；二进制文件改为 FAIL，人工复核后以 `bin:<相对路径>:<sha256>` 登记放行；

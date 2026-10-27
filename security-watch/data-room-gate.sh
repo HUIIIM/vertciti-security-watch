@@ -31,6 +31,11 @@
 #     GATE_PATTERN_SHA256 或 GATE_PATTERN_FP_FILE（指纹登记文件）提供，
 #     缺失或不符即 fail-closed 停发，不回退骨架作约束判定；
 #   - 未指定 GATE_PATTERN_FILE 时为骨架运行，输出显式标注「非约束性」。
+# 2026-10-27 (issue #5 复核) 骨架运行不得以 0 退出：骨架的规则 1/2 是合成占位模式，
+#   真实封存内容在骨架下不会命中；若仍以 PASS/exit 0 结束，漏设 GATE_PATTERN_FILE 的
+#   发布流水线会把它当成放行（按 README 快速开始原样运行即是此路径）。现骨架运行
+#   无 FAIL 时以 exit 3「NON-BINDING」结束；本地调试/测试须显式设 GATE_ALLOW_SKELETON=1
+#   才恢复 0。命中 FAIL 仍为 exit 1（骨架的私钥/token 等规则是真实模式）。
 # 用法：bash data-room-gate.sh [data-room目录]
 set -u
 set -o pipefail
@@ -43,6 +48,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "  模式集: 默认装载脚本同目录 gate-patterns-skeleton.txt（骨架，合成模式，非约束性运行）；"
   echo "    约束性运行须 GATE_PATTERN_FILE=<部署侧全量模式集> 且 GATE_PATTERN_SHA256=<登记指纹>"
   echo "    （或 GATE_PATTERN_FP_FILE=<指纹登记文件>），指纹不符即停发。"
+  echo "  骨架运行无 FAIL 时以 exit 3（NON-BINDING）结束，不是放行；GATE_ALLOW_SKELETON=1 仅供本地/测试恢复 exit 0。"
   echo "  命中输出默认脱敏；GATE_SHOW_CONTENT=1 输出原文（仅限本机人工复核，禁止在 CI 开启）。"
   exit 0
 fi
@@ -285,5 +291,10 @@ fi
 
 echo "---- 扫描文件数：$FILE_COUNT ----"
 if [ "$FAIL" -eq 1 ]; then echo "结果：FAIL —— 停止发布，整改后重跑"; exit 1; fi
+if [ -z "${GATE_PATTERN_FILE:-}" ] && [ "${GATE_ALLOW_SKELETON:-0}" != "1" ]; then
+  echo "结果：NON-BINDING —— 仓内骨架运行，未装载全量模式集，不能作为放行依据（exit 3）。"
+  echo "  发布运行须设 GATE_PATTERN_FILE + 指纹；仅本地调试/测试可设 GATE_ALLOW_SKELETON=1。"
+  exit 3
+fi
 if [ "$WARN" -eq 1 ]; then echo "结果：WARN —— 可发布，但请 GC 复核上述项"; exit 0; fi
 echo "结果：PASS"

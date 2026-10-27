@@ -107,7 +107,8 @@ def _run_gate(
     return subprocess.run(
         ["bash", str(script), str(data_dir)],
         capture_output=True, text=True, check=False,
-        env={**os.environ, **(env or {})},
+        # skeleton runs exit 3 (NON-BINDING) unless explicitly allowed; tests opt in
+        env={**os.environ, "GATE_ALLOW_SKELETON": "1", **(env or {})},
     )
 
 
@@ -383,7 +384,7 @@ def _run_gate_copy(
     data.mkdir()
     for name, text in files.items():
         (data / name).write_text(text, encoding="utf-8")
-    env = {**os.environ, "TMPDIR": str(base)}
+    env = {**os.environ, "TMPDIR": str(base), "GATE_ALLOW_SKELETON": "1"}
     return subprocess.run(
         ["bash", str(gate_dir / "data-room-gate.sh"), str(data)],
         capture_output=True, text=True, env=env, check=False,
@@ -445,3 +446,23 @@ def test_gate_redacts_password_value(tmp_path: Path) -> None:
     assert "GATE WARN" in res.stdout
     assert secret not in res.stdout
     assert secret not in res.stderr
+
+
+# ---- skeleton runs must never read as a release pass (issue #5 re-check) ----
+
+@needs_bash
+def test_gate_skeleton_run_is_non_binding_not_pass(tmp_path: Path) -> None:
+    # without GATE_PATTERN_FILE the date/keyword rules are synthetic placeholders,
+    # so a clean-looking result must not exit 0 and be taken for a release pass
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}),
+                    env={"GATE_ALLOW_SKELETON": "0"})
+    assert res.returncode == 3, res.stdout
+    assert "NON-BINDING" in res.stdout
+    assert "结果：PASS" not in res.stdout
+
+
+@needs_bash
+def test_gate_skeleton_run_still_fails_on_real_rules(tmp_path: Path) -> None:
+    data = _data(tmp_path, {"a.txt": "key ghp_" + "x" * 20 + "\n"})
+    res = _run_gate(tmp_path, data, env={"GATE_ALLOW_SKELETON": "0"})
+    assert res.returncode == 1, res.stdout

@@ -37,7 +37,8 @@ vertciti.com 每次生产发布前要过三道门禁，全部脚本化：敏感�
 ```bash
 cd vertciti-security-watch
 bash security-watch/data-room-gate.sh --help        # 看门禁 1 的 FAIL/WARN 规则
-bash security-watch/data-room-gate.sh ./data-room   # 扫一个目录（也可经环境变量 DATA_ROOM_DIR 指定）
+bash security-watch/data-room-gate.sh ./data-room   # 骨架运行：无 FAIL 时 exit 3（NON-BINDING），不是放行
+# 发布运行：GATE_PATTERN_FILE=<部署侧全量模式集> GATE_PATTERN_SHA256=<登记指纹> bash security-watch/data-room-gate.sh ./data-room
 ```
 
 ```bash
@@ -81,7 +82,8 @@ vertciti-security-watch/
 内部工具，维护中，尚无带版本号的发布；变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 已知限制：
-- 门禁 1 为双层形态（GC-20261027-002）：仓内 `gate-patterns-skeleton.txt` 只是结构骨架（真合成模式），不是完整门禁；具约束力的发布运行装载部署侧私有全量模式集并先验 sha256 指纹，不符或缺失即 fail-closed 停发、不回退骨架判定。
+- 门禁 1 为双层形态（GC-20261027-002）：仓内 `gate-patterns-skeleton.txt` 只是结构骨架（真合成模式），不是完整门禁；具约束力的发布运行装载部署侧私有全量模式集并先验 sha256 指纹，不符或缺失即 fail-closed 停发、不回退骨架判定。未装载全量模式集的骨架运行在无 FAIL 时以 exit 3（NON-BINDING）结束，不会以 0 被流水线当作放行；本地调试/测试可设 `GATE_ALLOW_SKELETON=1` 恢复 0。
+  A skeleton run (no full pattern set loaded) never exits 0: without a FAIL it ends with exit 3 (NON-BINDING); `GATE_ALLOW_SKELETON=1` restores exit 0 for local/test use only.
   Gate 1 is two-tier: the in-repo pattern file is a synthetic skeleton, not the complete gate; binding release runs load the deployment-side full pattern set and verify its registered sha256 fingerprint first, failing closed on any mismatch.
 - `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发；缺失/不可读时 fail-closed 停发，
   不再静默跳过检查（早期固定机器专属绝对路径、不可达时假过 PASS 的问题已修复）。条目为精确匹配
