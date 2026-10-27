@@ -16,7 +16,8 @@
 # 豁免: 纯文本内联链接 (display:inline 的 <a>, 如段落内链接) 不计违规,
 #      但计入豁免清单输出备查。
 #
-# 依赖: playwright sync_api (解释器经环境变量 TOUCH_TARGET_PYTHON 指定) + /opt/meta-chromium/chrome
+# 依赖: playwright sync_api (解释器经环境变量 TOUCH_TARGET_PYTHON 指定) + Chromium
+#      (默认 /opt/meta-chromium/chrome, 可经环境变量 TOUCH_TARGET_CHROME 覆盖)
 # 注意: localhost 会被 LocalNetworkAccessChecks 拦截, 本地渲染请用 file:// URL。
 # 标注: [PASS]/[FAIL]/[EXEMPT] 均为 ASCII 括号。
 # =====================================================================
@@ -50,6 +51,7 @@ if [ ! -x "$PY" ]; then
 fi
 
 "$PY" - "$URL" <<'PY_EOF'
+import os
 import sys
 from playwright.sync_api import sync_playwright
 
@@ -96,20 +98,27 @@ JS_COLLECT = """() => {
 violations = []   # (route_key, element)
 exempt = []       # (route_key, element)
 stats = {}        # route_key -> (checked, exempted)
+errors = []       # 加载失败 / JS 报错 / 空路由: 一律 FAIL, 不允许在没量到东西时报 PASS
 
 with sync_playwright() as pw:
     browser = pw.chromium.launch(
-        executable_path="/opt/meta-chromium/chrome",
+        executable_path=os.environ.get("TOUCH_TARGET_CHROME", "/opt/meta-chromium/chrome"),
         args=["--no-sandbox", "--disable-dev-shm-usage"])  # 2026-09-27: /dev/shm 仅 794M, 10MB 大页必 crash, 加此 flag 稳定
     ctx = browser.new_context(viewport={"width": 390, "height": 844},
                               has_touch=True, is_mobile=True)
     page = ctx.new_page()
+    page.on("pageerror", lambda exc: errors.append("JS error: %s" % exc))
     for route in ROUTES:
         for lang in LANGS:
             key = "#page=%s&lang=%s" % (route, lang)
-            page.goto(BASE + key)
+            resp = page.goto(BASE + key)
+            # 同文档 hash 跳转时 goto 返回 None; 有响应时必须 2xx (5xx/404 错误页不能算通过)
+            if resp is not None and not resp.ok:
+                errors.append("%s: HTTP %d" % (key, resp.status))
             page.wait_for_timeout(2500)  # 等 hash 路由 + JS 按需渲染
             els = page.evaluate(JS_COLLECT)
+            if not els:
+                errors.append("%s: 0 interactive elements (blank/error page?)" % key)
             n_check = n_ex = 0
             for e in els:
                 if e["inlineLink"]:
@@ -137,6 +146,11 @@ if exempt:
     if len(exempt) > 20:
         print("  ... and %d more" % (len(exempt) - 20))
 
+if errors:
+    print("\n[FAIL] page did not render as expected (nothing measured = no pass):")
+    for msg in errors[:20]:
+        print("  " + msg)
+
 if violations:
     print("\n[FAIL] touch target < 44x44:")
     for key, e in violations:
@@ -144,7 +158,8 @@ if violations:
         print("  route=%s" % key)
         print("    text=<%s> sel=%s size=%.1fx%.1f pos=(%d,%d)" % (
             txt, e["selector"], e["w"], e["h"], e["x"], e["y"]))
-    print("\nRESULT: [FAIL] %d violation(s)" % len(violations))
+if violations or errors:
+    print("\nRESULT: [FAIL] %d violation(s), %d render error(s)" % (len(violations), len(errors)))
     sys.exit(1)
 
 print("\nRESULT: [PASS] all %d interactive elements >= 44x44" % total_c)

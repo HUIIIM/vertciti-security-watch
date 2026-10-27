@@ -9,6 +9,18 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 
 ## [Unreleased]
 
+### Security
+- 门禁 1 `data-room-gate.sh` 修复多处失败即放行（fail-open），见独立评估 #5 / fixes fail-open paths in gate 1 (assessment #5):
+  扫描全部文件而非只扫 `*.txt`；二进制/不可读文件与空目录改为 FAIL；allowlist 改为按 `路径:行号` / `路径:*` 精确比对
+  （原整行子串匹配可让一个文件名放行整个文件）；不再按 "classification" 整行豁免；
+  增加 `2027/02`、`2027年2月`、`Feb 2027` 等写法与 `github_pat_`、`ghs_/ghu_/ghr_`、`sk-ant-`、`AIza` token；
+  命中只输出 `路径:行号`，不再把疑似口令/机密内容回显到日志。
+- 门禁 3 `touch-target-check.sh`：页面非 2xx、JS 报错或路由量不到任何可交互元素时 FAIL（原来空白页/错误页也报 PASS）；
+  浏览器路径可经 `TOUCH_TARGET_CHROME` 覆盖 / gate 3 fails on non-2xx, JS errors and empty routes.
+
+### Fixed
+- `color-audit.py`：`--json` 缺少路径时给出用法提示而非 IndexError；越界色值分量按 CSS 规则钳位 / usage error and component clamping.
+
 ### Added
 - 产品一页纸 `docs/PRODUCT.md` 与本 CHANGELOG / product one-pager and this changelog (2026-10-22).
 - README 增加状态说明、`## 安全 / Security`、`## 许可证 / License` 双语章节 / README status line and bilingual security and license sections (2026-10-22).

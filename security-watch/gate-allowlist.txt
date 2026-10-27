@@ -1,0 +1,5 @@
+# data-room-gate.sh allowlist —— 门禁 1 的误报在这里登记，每条都应能说清为什么放行。
+# 格式（相对 data-room 目录的路径，按 "路径:行号" 精确比对，不做子串匹配）：
+#   docs/example.txt:12     放行 docs/example.txt 第 12 行的命中
+#   brochure.pdf:*          放行整个文件（人工复核过的二进制文件或整份示例文档）
+# 空行与 # 开头的行忽略。私钥块检查不经 allowlist。
