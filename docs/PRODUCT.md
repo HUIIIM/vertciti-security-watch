@@ -33,17 +33,17 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
 | 与其他方案的效果对比 / Measured comparison | 未确认（TBD） | 未确认（TBD） |
 
 ## 证据 / Evidence
-- 测试 / Tests：`tests/test_audit_scripts.py` 共 8 个 pytest 用例（2026-10-22 本地运行 8 passed），覆盖 color-audit 归一化与提取、shadow-audit 规则解析、data-room-gate 的 PASS / token FAIL / 目录不存在 FAIL。CI：`.github/workflows/ci.yml` 的 `test` job（pytest + ruff）。
-  8 pytest cases, run locally on 2026-10-22: 8 passed.
-- 真实运行 / Real runs：`docs/assets/demo.gif`、`docs/assets/screenshot-gate.png`；`security-watch/archive/color-audit-2026-09-27.json`（一次 color-audit 的归档输出）。
+- 测试 / Tests：`tests/test_audit_scripts.py` 共 14 个 pytest 用例（2026-10-26 本地运行 14 passed），覆盖 color-audit 归一化与提取、shadow-audit 规则解析、data-room-gate 的 PASS / token FAIL / 目录不存在 FAIL，以及 issue #6 的 fail-closed 回归（allowlist 缺失 / 空行 / 子串条目 / 零文件 / 精确条目 / 口令脱敏）。CI：`.github/workflows/ci.yml` 的 `test` job（pytest + ruff）。
+  14 pytest cases, run locally on 2026-10-26: 14 passed.
+- 演示素材（示意）/ Demo assets (illustrative)：`docs/assets/demo.gif`、`docs/assets/screenshot-gate.png` 为合成示意图、非真实运行录制，真实录屏待重录；`security-watch/archive/color-audit-2026-09-27.json`（一次 color-audit 的归档输出）。
 - 不能证明的 / Not proven：门禁 3（touch-target-check.sh）与 shadow-audit.py 依赖本机文件与浏览器环境，测试未覆盖其端到端运行；生产发布流水线是否强制调用这些脚本，本仓库内无法验证。
   Gate 3 and shadow-audit.py depend on local files/browser and are not covered end-to-end; whether the production pipeline enforces these gates is not verifiable from this repo.
 
 ## 边界与风险 / Scope and risks
 - 不做 / Does not：不自动修改生产文件、不改防火墙、不向外推送（见 README"诚实约定"）。
 - 已知限制 / Known limitations：
-  - `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发，不可读时 fail-closed 停发。早期版本曾固定为维护者本机绝对路径——该目录不存在时 `grep -f` 报错被管道吞掉，FAIL/WARN 检查（`2027-02`、绝密字样、token、口令、邮箱）会被跳过并输出 PASS（2026-10-22 本地复现，已修复）。私钥块检查不受影响。
-    The allowlist now resolves relative to the script's own directory and ships with it; an unreadable allowlist fails closed. An earlier version used a fixed maintainer-machine absolute path, and a missing directory silently skipped most checks and reported PASS (reproduced locally 2026-10-22; fixed). The private-key check was unaffected.
+  - `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发，缺失/不可读时 fail-closed 停发；条目为精确匹配（`文件:行号:精确内容` 或 `fp:` 指纹），子串匹配已废止；可扫描文件数为 0 时 FAIL，不真空通过（2026-10-26，issue #6）。早期版本曾固定为维护者本机绝对路径——该目录不存在时 `grep -f` 报错被管道吞掉，FAIL/WARN 检查（`2027-02`、绝密字样、token、口令、邮箱）会被跳过并输出 PASS（2026-10-22 本地复现，已修复）。私钥块检查不受影响。
+    The allowlist now resolves relative to the script's own directory and ships with it; a missing or unreadable allowlist fails closed. Entries match exactly (`file:line:exact content` or `fp:` fingerprints); substring matching was abolished, and zero scannable files fails instead of passing vacuously (2026-10-26, issue #6). An earlier version used a fixed maintainer-machine absolute path, and a missing directory silently skipped most checks and reported PASS (reproduced locally 2026-10-22; fixed). The private-key check was unaffected.
   - 只扫描 `*.txt` 文件 / Only `*.txt` files are scanned.
   - `shadow-audit.py` 输入路径须经位置参数或环境变量 `SHADOW_AUDIT_SRC` 显式传入，无内置默认目标（早期版本曾硬编码维护者本机生产源路径，已参数化）。
   - `touch-target-check.sh` 默认目标与依赖路径绑定维护者本机。
@@ -56,7 +56,7 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
 | 阶段 / Stage | 内容 / Content | 退出标准 / Exit criteria |
 |---|---|---|
 | Now | CI 运行 pytest + ruff + shellcheck + gitleaks | CI 全绿 / CI green |
-| Next | 未确认（TBD）— 候选：修复 allowlist 缺失时放行的问题 / candidate: fix fail-open on missing allowlist | 未确认（TBD） |
+| Next | 未确认（TBD）— allowlist 缺失时放行的问题已于 2026-10-26 随 issue #6 修复 / fail-open on missing allowlist fixed 2026-10-26 with issue #6 | 未确认（TBD） |
 | Later | 未确认（TBD） | 未确认（TBD） |
 
 ## 衡量指标 / Metrics

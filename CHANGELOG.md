@@ -26,5 +26,10 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 - GitHub Actions 升级到最新主版本 / GitHub Actions upgraded to latest major versions (2026-09-27, `6b61814`).
 
 ### Fixed
+- `security-watch/data-room-gate.sh`（issue #6）：门禁 1 改 fail-closed——`set -o pipefail`，逐检查区分 grep 退出码（≥2 为扫描出错即 FAIL）；allowlist 缺失即 FAIL（不再自动建空文件），空行/注释行剔除；可扫描 `.txt` 文件数为 0 即 FAIL，禁止真空通过 / gate 1 made fail-closed: pipefail, grep exit codes distinguished, missing allowlist fails, zero scannable files fails (2026-10-26).
+- `security-watch/data-room-gate.sh`（issue #6）：allowlist 改精确匹配——条目 `文件:行号:精确内容` 或 `fp:<sha256>` 指纹，废止整行子串匹配（空行/短条目曾可放行一切）；部署侧旧条目已迁移（1 条有现行实例者转精确条目，1 条无实例者失效待重登记）/ allowlist switched to exact file:line:content or fingerprint entries, substring matching abolished (2026-10-26).
+- `security-watch/data-room-gate.sh`（issue #6）：命中输出默认脱敏——只出文件:行号与掩码/指纹，口令、连接串、token 明文零出 stdout；原文输出须显式 `GATE_SHOW_CONTENT=1`（仅限本机人工复核）/ hit output redacted by default, plaintext only behind explicit GATE_SHOW_CONTENT=1 (2026-10-26).
+- README 与 `docs/PRODUCT.md`：演示 GIF/截图的「本机真实运行 / Real runs」措辞改为「示意 / illustrative」——素材为合成示意图、非真实运行录制，真实录屏待重录 / demo assets re-labelled illustrative pending real re-recording (2026-10-26).
+- `tests/test_audit_scripts.py`：新增 6 个门禁 fail-closed 回归用例（issue #6），共 14 个 / six new fail-closed regression tests, 14 total (2026-10-26).
 - `security-watch/data-room-gate.sh`：目标目录参数化（位置参数/环境变量 `DATA_ROOM_DIR`、无内置默认），allowlist 改脚本同目录相对解析＋不可读 fail-closed，消除固定机器专属绝对路径与已退役检出路径默认；`qa-gates/touch-target-check.sh` 解释器改经 `TOUCH_TARGET_PYTHON` 指定 / gate target parameterized, allowlist script-relative with fail-closed guard, touch-target interpreter via env var (2026-10-26).
 - gitleaks workflow 增加 `pull-requests: read` 权限 / gitleaks workflow gains `pull-requests: read` (2026-10-22).

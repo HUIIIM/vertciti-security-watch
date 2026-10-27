@@ -12,7 +12,7 @@ vertciti.com 生产发布前运行的三道发布门禁脚本（敏感信息扫�
 | 语言 | 简体中文（安全、许可证段落附英文） |
 | 联系 | 安全漏洞：[.github/SECURITY.md](.github/SECURITY.md) · 产品：[vertciti.com](https://vertciti.com) |
 
-演示录屏（本机真实运行：门禁 1 通过 → 门禁 3 通过 → 混入假密钥后 FAIL 停发）、架构图和门禁运行截图在
+演示录屏（示意演示：门禁 1 通过 → 门禁 3 通过 → 混入假密钥后 FAIL 停发；该 GIF 与截图为合成示意图、非真实运行录制，真实录屏待重录）、架构图和门禁运行截图在
 [docs/assets](docs/assets)；仓库已公开，演示图以链接形式给出、不内嵌。演示用的是假密钥（`ghp_fake…`），不含任何真实凭证。
 
 ## 概览
@@ -30,7 +30,7 @@ vertciti.com 每次生产发布前要过三道门禁，全部脚本化：敏感�
 | 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕 |
 | — | 颜色审计 | `security-watch/color-audit.py` | 只读：提取首页内联 CSS 与 `style=` 中的全部色值并统计 |
 | — | box-shadow 审计 | `security-watch/shadow-audit.py` | 只读：列出首页每条 box-shadow 声明的选择器、行号与取值 |
-| — | allowlist | `security-watch/gate-allowlist.txt` | 门禁 1 的误报在这里登记；审计产物归档在 `security-watch/archive/` |
+| — | allowlist | `security-watch/gate-allowlist.txt` | 门禁 1 的误报在这里登记：按 `文件:行号:精确内容`（或 `fp:` 指纹）逐实例登记，子串匹配已废止；部署侧登记为准，仓内文件为空占位；审计产物归档在 `security-watch/archive/` |
 
 ## 快速开始
 
@@ -81,10 +81,13 @@ vertciti-security-watch/
 内部工具，维护中，尚无带版本号的发布；变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 已知限制：
-- `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发；不可读时 fail-closed 停发，
-  不再静默跳过检查（早期固定机器专属绝对路径、不可达时假过 PASS 的问题已修复）。
-  The allowlist resolves relative to the script's own directory and ships with it; an unreadable
-  allowlist fails closed instead of silently skipping checks.
+- `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发；缺失/不可读时 fail-closed 停发，
+  不再静默跳过检查（早期固定机器专属绝对路径、不可达时假过 PASS 的问题已修复）。条目为精确匹配
+  （`文件:行号:精确内容` 或 `fp:` 指纹），子串匹配已废止；可扫描文件数为 0 时 FAIL（2026-10-26，issue #6）。
+  The allowlist resolves relative to the script's own directory and ships with it; a missing or
+  unreadable allowlist fails closed instead of silently skipping checks. Entries match exactly
+  (`file:line:exact content` or `fp:` fingerprints); substring matching was abolished, and zero
+  scannable files fails instead of passing vacuously (2026-10-26, issue #6).
 - 审计脚本与门禁 3 的解释器/目标路径经环境变量显式指定（无内置默认）；浏览器路径 `/opt/meta-chromium/chrome` 绑定维护者本机。
 
 更多见 [docs/PRODUCT.md](docs/PRODUCT.md)。
