@@ -25,7 +25,7 @@ vertciti.com 每次生产发布前要过三道门禁，全部脚本化：敏感�
 
 | # | 门禁 / 工具 | 脚本 | 判定 |
 |---|---|---|---|
-| 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | 扫描目录内全部文件（不限 .txt）。FAIL：私钥 / `ghp_` 等 token / 绝密字样 / `2027-02` 及其各种写法 / 无法按文本扫描的文件（二进制、不可读）/ 目录为空。WARN（人工复核）：口令赋值、邮箱地址。命中默认脱敏输出（`路径:行号` + 掩码/指纹），不回显明文 |
+| 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | 扫描目录内全部文件（不限 .txt）。FAIL：私钥 / `ghp_` 等 token / 规则 2 停发字样 / 规则 1 封存日期及其各种写法 / 无法按文本扫描的文件（二进制、不可读）/ 目录为空。WARN（人工复核）：口令赋值、邮箱地址。命中默认脱敏输出（`路径:行号` + 掩码/指纹），不回显明文 |
 | 2 | 首页可访问 | `curl -sI https://vertciti.com/` | 非 200 即 FAIL（在部署任务内执行） |
 | 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕。页面返回非 2xx、出现 JS 报错或某条路由量不到任何可交互元素时也 FAIL |
 | — | 颜色审计 | `security-watch/color-audit.py` | 只读：提取首页内联 CSS 与 `style=` 中的全部色值并统计 |
@@ -81,6 +81,8 @@ vertciti-security-watch/
 内部工具，维护中，尚无带版本号的发布；变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 已知限制：
+- 门禁 1 为双层形态（GC-20261027-002）：仓内 `gate-patterns-skeleton.txt` 只是结构骨架（真合成模式），不是完整门禁；具约束力的发布运行装载部署侧私有全量模式集并先验 sha256 指纹，不符或缺失即 fail-closed 停发、不回退骨架判定。
+  Gate 1 is two-tier: the in-repo pattern file is a synthetic skeleton, not the complete gate; binding release runs load the deployment-side full pattern set and verify its registered sha256 fingerprint first, failing closed on any mismatch.
 - `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发；缺失/不可读时 fail-closed 停发，
   不再静默跳过检查（早期固定机器专属绝对路径、不可达时假过 PASS 的问题已修复）。条目为精确匹配
   （`文件:行号:精确内容` 或 `fp:` 指纹），子串匹配已废止；可扫描文件数为 0 时 FAIL（2026-10-26，issue #6）。
