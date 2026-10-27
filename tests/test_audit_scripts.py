@@ -9,6 +9,7 @@ import importlib.util
 import os
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -119,3 +120,82 @@ def test_gate_fails_on_missing_dir(tmp_path: Path) -> None:
     res = _run_gate(tmp_path / "home", tmp_path / "nope")
     assert res.returncode == 1
     assert "目录不存在" in res.stdout
+
+
+# ---- data-room-gate.sh fail-closed regressions (issue #6) ----
+
+def _run_gate_copy(
+    tmp_path: Path, allowlist: str | None, files: dict[str, str]
+) -> subprocess.CompletedProcess:
+    """Run a scratch copy of the gate whose allowlist sits beside the script."""
+    base = tmp_path / ("run-" + uuid.uuid4().hex[:8])
+    gate_dir = base / "gate"
+    gate_dir.mkdir(parents=True)
+    shutil.copy(SW / "data-room-gate.sh", gate_dir / "data-room-gate.sh")
+    if allowlist is not None:
+        (gate_dir / "gate-allowlist.txt").write_text(allowlist, encoding="utf-8")
+    data = base / "data-room"
+    data.mkdir()
+    for name, text in files.items():
+        (data / name).write_text(text, encoding="utf-8")
+    env = {**os.environ, "TMPDIR": str(base)}
+    return subprocess.run(
+        ["bash", str(gate_dir / "data-room-gate.sh"), str(data)],
+        capture_output=True, text=True, env=env, check=False,
+    )
+
+
+@needs_bash
+def test_gate_fails_when_allowlist_missing(tmp_path: Path) -> None:
+    res = _run_gate_copy(tmp_path, None, {"a.txt": "hello\n"})
+    assert res.returncode == 1
+    assert "allowlist" in res.stdout
+
+
+@needs_bash
+def test_gate_fails_when_no_txt_files(tmp_path: Path) -> None:
+    res = _run_gate_copy(tmp_path, "", {"secret.md": "ghp_" + "y" * 30 + "\n"})
+    assert res.returncode == 1
+    assert "文件数为 0" in res.stdout
+
+
+@needs_bash
+def test_gate_blank_allowlist_lines_do_not_suppress(tmp_path: Path) -> None:
+    res = _run_gate_copy(
+        tmp_path, "\n   \n# comment\n", {"a.txt": "key ghp_" + "x" * 30 + "\n"}
+    )
+    assert res.returncode == 1
+    assert "GATE FAIL" in res.stdout
+
+
+@needs_bash
+def test_gate_substring_allowlist_entry_does_not_suppress(tmp_path: Path) -> None:
+    res = _run_gate_copy(tmp_path, "t\n", {"a.txt": "key ghp_" + "x" * 30 + "\n"})
+    assert res.returncode == 1
+    assert "GATE FAIL" in res.stdout
+
+
+@needs_bash
+def test_gate_exact_allowlist_entry_suppresses_only_its_instance(
+    tmp_path: Path,
+) -> None:
+    line = "key ghp_" + "x" * 30
+    entry = "a.txt:1:" + line + "\n"
+    res = _run_gate_copy(tmp_path, entry, {"a.txt": line + "\n"})
+    assert res.returncode == 0, res.stdout
+    assert "结果：PASS" in res.stdout
+    res2 = _run_gate_copy(
+        tmp_path, entry, {"a.txt": line + "\n", "b.txt": line + "\n"}
+    )
+    assert res2.returncode == 1
+    assert "b.txt" in res2.stdout
+
+
+@needs_bash
+def test_gate_redacts_password_value(tmp_path: Path) -> None:
+    secret = "Sup3rSecretValue"
+    res = _run_gate_copy(tmp_path, "", {"a.txt": "db password = " + secret + "\n"})
+    assert res.returncode == 0, res.stdout
+    assert "GATE WARN" in res.stdout
+    assert secret not in res.stdout
+    assert secret not in res.stderr
