@@ -1,0 +1,5 @@
+# CI test tools (lint + tests). Edit this file, then regenerate the hash-locked
+# requirements-dev.txt with:
+#   pip-compile --generate-hashes --allow-unsafe requirements-dev.in
+pytest==9.1.1
+ruff==0.16.9
