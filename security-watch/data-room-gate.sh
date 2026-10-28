@@ -36,6 +36,11 @@
 #   发布流水线会把它当成放行（按 README 快速开始原样运行即是此路径）。现骨架运行
 #   无 FAIL 时以 exit 3「NON-BINDING」结束；本地调试/测试须显式设 GATE_ALLOW_SKELETON=1
 #   才恢复 0。命中 FAIL 仍为 exit 1（骨架的私钥/token 等规则是真实模式）。
+# 2026-10-28 (#6 OPS-2) 机器可读运行记录：设 GATE_JSON_OUT=<路径> 时，每次运行（含中途
+#   fail-closed 退出）结束都写一份 JSON：结果与退出码、模式集形态与 sha256、allowlist 与
+#   脚本 sha256、被扫文件清单指纹（相对路径+文件 sha256，排序后再取 sha256），以及每条
+#   命中的 规则/级别/相对路径/行号——只有位置，不含任何命中内容。要求了记录却写不出来
+#   （如缺 python3）即 exit 1，不让流水线在缺证据时放行。
 # 用法：bash data-room-gate.sh [data-room目录]
 set -u
 set -o pipefail
@@ -49,6 +54,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "    约束性运行须 GATE_PATTERN_FILE=<部署侧全量模式集> 且 GATE_PATTERN_SHA256=<登记指纹>"
   echo "    （或 GATE_PATTERN_FP_FILE=<指纹登记文件>），指纹不符即停发。"
   echo "  骨架运行无 FAIL 时以 exit 3（NON-BINDING）结束，不是放行；GATE_ALLOW_SKELETON=1 仅供本地/测试恢复 exit 0。"
+  echo "  GATE_JSON_OUT=<路径>：结束时写机器可读运行记录（JSON，只含命中位置，不含内容）；写不出即 exit 1。"
   echo "  命中输出默认脱敏；GATE_SHOW_CONTENT=1 输出原文（仅限本机人工复核，禁止在 CI 开启）。"
   exit 0
 fi
@@ -62,8 +68,70 @@ ALLOWLIST_SRC="$SCRIPT_DIR/gate-allowlist.txt"
 FAIL=0; WARN=0
 
 WORK_TMP="$(mktemp -d)"
-trap 'rm -rf "$WORK_TMP"' EXIT
 RAW="$WORK_TMP/raw"; RAW2="$WORK_TMP/raw2"; KEPT="$WORK_TMP/kept"; EFF="$WORK_TMP/allowlist.eff"
+FINDINGS="$WORK_TMP/findings.tsv"; : > "$FINDINGS"   # 规则<TAB>级别<TAB>相对路径<TAB>行号，供运行记录
+
+# write_record <退出码>：GATE_JSON_OUT 指定时写 JSON 运行记录；失败返回非 0。
+write_record() {
+  local rc="$1" result
+  case "$rc" in
+    0) if [ "$WARN" -eq 1 ]; then result=WARN; else result=PASS; fi ;;
+    1) result=FAIL ;;
+    3) result=NON-BINDING ;;
+    *) result=ERROR ;;
+  esac
+  command -v python3 >/dev/null 2>&1 || { echo "GATE FAIL: 要求写运行记录（GATE_JSON_OUT）但缺少 python3" >&2; return 1; }
+  python3 -I - "$GATE_JSON_OUT" "$rc" "$result" "$DIR" "${BASH_SOURCE[0]}" "$ALLOWLIST_SRC" \
+      "${PATTERN_SRC:-}" "${GATE_PATTERN_FILE:+full}" "$WORK_TMP/files" "$FINDINGS" <<'PY_EOF'
+import datetime, hashlib, json, os, sys
+out, rc, result, root, script, allowlist, patterns, mode, files, findings = sys.argv[1:11]
+
+def sha(path):
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+manifest = []
+if os.path.exists(files):
+    for p in open(files, "rb").read().split(b"\0"):
+        if p:
+            p = p.decode("utf-8", "surrogateescape")
+            manifest.append("%s\t%s" % (os.path.relpath(p, root), sha(p)))
+manifest.sort()
+hits = []
+for row in open(findings, encoding="utf-8", errors="replace"):
+    rule, severity, path, line = (row.rstrip("\n").split("\t") + ["", "", "", ""])[:4]
+    hits.append({"rule": rule, "severity": severity, "path": path or None,
+                 "line": int(line) if line.isdigit() else None})
+record = {
+    "schema": "vertciti-data-room-gate/1",
+    "finished_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    "result": result,
+    "exit_code": int(rc),
+    "pattern_set": {"mode": mode or "skeleton", "sha256": sha(patterns) if patterns else None},
+    "allowlist_sha256": sha(allowlist),
+    "script_sha256": sha(script),
+    "files_scanned": len(manifest),
+    "files_manifest_sha256": hashlib.sha256("\n".join(manifest).encode()).hexdigest(),
+    "findings": hits,
+}
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(record, f, ensure_ascii=False, indent=1)
+    f.write("\n")
+PY_EOF
+}
+on_exit() {
+  local rc=$?
+  if [ -n "${GATE_JSON_OUT:-}" ] && ! write_record "$rc"; then
+    echo "GATE FAIL: 运行记录写入失败 $GATE_JSON_OUT —— fail-closed" >&2
+    rc=1
+  fi
+  rm -rf "$WORK_TMP"
+  exit "$rc"
+}
+trap on_exit EXIT
 
 [ -d "$DIR" ] || { echo "GATE FAIL: 目录不存在 $DIR"; exit 1; }
 # allowlist 随脚本同目录分发（相对脚本位置解析，不依赖机器专属路径）。
@@ -126,7 +194,16 @@ fi
 
 say_fail() { echo "GATE FAIL: $1"; FAIL=1; }
 say_warn() { echo "GATE WARN: $1"; WARN=1; }
-scan_error() { echo "GATE FAIL: $1 扫描过程出错（grep 退出码 $2）—— fail-closed 停发"; FAIL=1; }
+scan_error() { echo "GATE FAIL: $1 扫描过程出错（grep 退出码 $2）—— fail-closed 停发"; FAIL=1; printf '%s\terror\t\t\n' "$1" >> "$FINDINGS"; }
+# record_hits <规则> <级别>：把 KEPT 中全部命中的位置（不含内容）记入 FINDINGS。
+record_hits() {
+  local line
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^(.*):([0-9]+):(.*)$ ]]; then
+      printf '%s\t%s\t%s\t%s\n' "$1" "$2" "${BASH_REMATCH[1]#"$DIR"/}" "${BASH_REMATCH[2]}" >> "$FINDINGS"
+    fi
+  done < "$KEPT"
+}
 
 # 0. 二进制文件：grep -I 会静默跳过，等于没扫。非空且无法按文本读取的文件一律 FAIL，
 #    除非 allowlist 有与当前文件内容绑定的 bin:<相对路径>:<sha256> 条目。
@@ -137,7 +214,10 @@ while IFS= read -r -d '' f; do
   if ! grep -qI '' "$f"; then
     rel="${f#"$DIR"/}"
     sum="$(sha256sum "$f" | cut -d' ' -f1)"
-    grep -qxF "bin:$rel:$sum" "$EFF" || echo "$rel: [二进制，无法按文本扫描 sha256=$sum]" >> "$WORK_TMP/binary"
+    if ! grep -qxF "bin:$rel:$sum" "$EFF"; then
+      echo "$rel: [二进制，无法按文本扫描 sha256=$sum]" >> "$WORK_TMP/binary"
+      printf 'binary\tfail\t%s\t\n' "$rel" >> "$FINDINGS"
+    fi
   fi
 done < "$WORK_TMP/files"
 # 0b. 符号链接：grep -r 不跟随、find -type f 也不计数——等于没扫；而发布时链接目标照样会被
@@ -148,6 +228,7 @@ fi
 if [ -s "$WORK_TMP/links" ]; then
   say_fail "存在符号链接（不会被扫描；请替换为实体文件后重跑）："
   head -5 "$WORK_TMP/links" | while IFS= read -r l; do echo "${l#"$DIR"/}"; done
+  while IFS= read -r l; do printf 'symlink\tfail\t%s\t\n' "${l#"$DIR"/}" >> "$FINDINGS"; done < "$WORK_TMP/links"
 fi
 if [ -s "$WORK_TMP/binary" ]; then
   say_fail "存在无法按文本扫描的文件（人工复核后以 bin:<相对路径>:<sha256> 登记 allowlist）："
@@ -231,6 +312,7 @@ elif [ "$GRC" -eq 0 ]; then
   apply_allowlist
   if [ -s "$KEPT" ]; then
     say_fail "命中规则 1（封存日期类）内容："
+    record_hits rule1 fail
     print_hits redact
   fi
 fi
@@ -244,6 +326,7 @@ elif [ "$GRC" -eq 0 ]; then
   apply_allowlist
   if [ -s "$KEPT" ]; then
     say_fail "命中规则 2（停发字样）："
+    record_hits rule2 fail
     print_hits redact
   fi
 fi
@@ -255,6 +338,7 @@ if [ "$GRC" -ge 2 ]; then
 elif [ "$GRC" -eq 0 ]; then
   cp "$RAW" "$KEPT"
   say_fail "命中私钥块："
+  record_hits rule3 fail
   print_hits redact
 fi
 
@@ -266,6 +350,7 @@ elif [ "$GRC" -eq 0 ]; then
   apply_allowlist
   if [ -s "$KEPT" ]; then
     say_fail "命中疑似密钥 token："
+    record_hits rule4 fail
     print_hits redact
   fi
 fi
@@ -281,6 +366,7 @@ elif [ "$GRC" -eq 0 ]; then
     apply_allowlist
     if [ -s "$KEPT" ]; then
       say_warn "命中疑似口令赋值（请人工确认是否为示例）："
+      record_hits rule5 warn
       print_hits assign
     fi
   fi
@@ -294,6 +380,7 @@ elif [ "$GRC" -eq 0 ]; then
   apply_allowlist
   if [ -s "$KEPT" ]; then
     say_warn "命中邮箱地址（请确认是否为应公开的联系邮箱）："
+    record_hits rule6 warn
     print_hits email
   fi
 fi
