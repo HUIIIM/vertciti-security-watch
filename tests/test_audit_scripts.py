@@ -546,3 +546,60 @@ def test_gate_fails_on_symlink(tmp_path: Path) -> None:
     res = _run_gate(tmp_path, data)
     assert res.returncode == 1, res.stdout
     assert "符号链接" in res.stdout and "link.txt" in res.stdout
+
+
+# ---- touch-target-check.sh route-table config ----
+
+QA = ROOT / "qa-gates"
+
+
+def _run_touch_target(tmp_path: Path, *, with_routes_file: bool,
+                      env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    """Run a copy of gate 3 with a stub python that reports the routes it saw.
+
+    The stub drains the embedded Python from stdin and prints the effective
+    TOUCH_TARGET_ROUTES, so no browser is needed to test the config chain.
+    """
+    gate_dir = tmp_path / "gate3"
+    gate_dir.mkdir(exist_ok=True)
+    script = gate_dir / "touch-target-check.sh"
+    shutil.copy(QA / "touch-target-check.sh", script)
+    if with_routes_file:
+        shutil.copy(QA / "touch-target-routes.txt", gate_dir / "touch-target-routes.txt")
+    stub = gate_dir / "stub-python"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        "cat > /dev/null\n"
+        "printf 'SAW_ROUTES=%s\\n' \"${TOUCH_TARGET_ROUTES-<unset>}\"\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    run_env = {k: v for k, v in os.environ.items() if k != "TOUCH_TARGET_ROUTES"}
+    run_env["TOUCH_TARGET_PYTHON"] = str(stub)
+    run_env.update(env or {})
+    return subprocess.run(
+        ["bash", str(script), "https://example.invalid/"],
+        capture_output=True, text=True, check=False, env=run_env,
+    )
+
+
+@needs_bash
+def test_gate3_routes_fall_back_to_config_file(tmp_path: Path) -> None:
+    res = _run_touch_target(tmp_path, with_routes_file=True)
+    assert "source=file" in res.stderr
+    assert "SAW_ROUTES=/ /business/ /data-room/ /company/ /accessibility/ /contact/" in res.stdout
+
+
+@needs_bash
+def test_gate3_routes_env_overrides_config_file(tmp_path: Path) -> None:
+    res = _run_touch_target(tmp_path, with_routes_file=True,
+                            env={"TOUCH_TARGET_ROUTES": "/ /company/"})
+    assert "source=env" in res.stderr
+    assert "SAW_ROUTES=/ /company/" in res.stdout
+
+
+@needs_bash
+def test_gate3_routes_default_without_env_or_file(tmp_path: Path) -> None:
+    res = _run_touch_target(tmp_path, with_routes_file=False)
+    assert "source=default" in res.stderr
+    assert "SAW_ROUTES=<unset>" in res.stdout
