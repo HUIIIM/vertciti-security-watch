@@ -533,3 +533,16 @@ def test_gate2_fails_when_unreachable() -> None:
     res = _run_gate2("http://127.0.0.1:%d/" % port)
     assert res.returncode == 1, res.stdout
     assert "请求失败" in res.stdout
+
+
+@needs_bash
+def test_gate_fails_on_symlink(tmp_path: Path) -> None:
+    # grep -r does not follow links and find -type f does not count them, yet a
+    # publish step may copy the target: a link must not slip through unscanned
+    outside = tmp_path / "outside.txt"
+    outside.write_text("key ghp_" + "x" * 20 + "\n", encoding="utf-8")
+    data = _data(tmp_path, {"a.txt": CLEAN})
+    (data / "link.txt").symlink_to(outside)
+    res = _run_gate(tmp_path, data)
+    assert res.returncode == 1, res.stdout
+    assert "符号链接" in res.stdout and "link.txt" in res.stdout

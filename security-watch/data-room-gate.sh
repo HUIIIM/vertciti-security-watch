@@ -140,6 +140,15 @@ while IFS= read -r -d '' f; do
     grep -qxF "bin:$rel:$sum" "$EFF" || echo "$rel: [二进制，无法按文本扫描 sha256=$sum]" >> "$WORK_TMP/binary"
   fi
 done < "$WORK_TMP/files"
+# 0b. 符号链接：grep -r 不跟随、find -type f 也不计数——等于没扫；而发布时链接目标照样会被
+#     带出去（可能指向目录外的任意文件）。一律 FAIL，换成实体文件后重跑即可被正常扫描。
+if ! find "$DIR" -type l > "$WORK_TMP/links" 2>/dev/null; then
+  echo "GATE FAIL: 枚举符号链接失败 —— fail-closed 停发"; exit 1
+fi
+if [ -s "$WORK_TMP/links" ]; then
+  say_fail "存在符号链接（不会被扫描；请替换为实体文件后重跑）："
+  head -5 "$WORK_TMP/links" | while IFS= read -r l; do echo "${l#"$DIR"/}"; done
+fi
 if [ -s "$WORK_TMP/binary" ]; then
   say_fail "存在无法按文本扫描的文件（人工复核后以 bin:<相对路径>:<sha256> 登记 allowlist）："
   head -5 "$WORK_TMP/binary"

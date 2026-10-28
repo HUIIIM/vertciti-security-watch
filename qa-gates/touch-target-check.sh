@@ -95,6 +95,9 @@ JS_COLLECT = """() => {
   for (const el of els) {
     const r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) continue;
+    // 完全移出页面的元素 (如 left:-9999px 的跳转链接) 无法被点按, 不计入
+    if (r.right <= 0 || r.bottom + window.scrollY <= 0
+        || r.left >= document.documentElement.scrollWidth) continue;
     const st = getComputedStyle(el);
     if (st.display === 'none' || st.visibility === 'hidden') continue;
     if (el.tagName === 'INPUT' && el.type === 'hidden') continue;
