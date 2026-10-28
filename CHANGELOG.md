@@ -10,6 +10,7 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- 门禁 1 机器可读运行记录：设 `GATE_JSON_OUT=<路径>` 时，每次运行（含中途 fail-closed 退出）结束都写 JSON——结果与退出码、模式集形态与 sha256、allowlist 与脚本 sha256、被扫文件清单指纹（相对路径 + 文件 sha256）、每条命中的规则/级别/相对路径/行号，**不含命中内容**；要求了记录却写不出即 exit 1（#6 OPS-2、§4c-1）/ gate 1 writes an optional machine-readable run record (locations only, never content).
 - 门禁 1：数据目录内的符号链接改为 FAIL。`grep -r` 不跟随、`find -type f` 不计数，链接目标却可能随发布带出（#6 复现 G2）/ gate 1 fails on symlinks.
 - 门禁 3：完全移出页面的元素（如 `left:-9999px` 的跳转链接）不再误报为触控违规（#6 §2.2）/ gate 3 ignores fully off-page elements.
 - 门禁 2 落成脚本 `qa-gates/homepage-200-check.sh`：取站点自身状态码（`curl -w '%{http_code}'`，不跟随重定向），非 200 / 连接失败 / 超时即 exit 1。此前只是文档里的 `curl -sI … | head -1`，退出码恒为 0，且在代理后读到的是代理的 CONNECT 200（#6 ARCH-6）/ gate 2 is now a real script.

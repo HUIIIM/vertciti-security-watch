@@ -7,6 +7,7 @@ names contain hyphens.
 
 import hashlib
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -546,3 +547,65 @@ def test_gate_fails_on_symlink(tmp_path: Path) -> None:
     res = _run_gate(tmp_path, data)
     assert res.returncode == 1, res.stdout
     assert "符号链接" in res.stdout and "link.txt" in res.stdout
+
+
+# ---- gate 1 machine-readable run record (GATE_JSON_OUT, #6 OPS-2) ----
+
+def _record(tmp_path: Path, data: Path, **kw: str) -> tuple:
+    out = tmp_path / "record.json"
+    res = _run_gate(tmp_path, data, env={"GATE_JSON_OUT": str(out), **kw})
+    return res, (json.loads(out.read_text(encoding="utf-8")) if out.exists() else None)
+
+
+@needs_bash
+def test_gate_record_clean_run(tmp_path: Path) -> None:
+    res, rec = _record(tmp_path, _data(tmp_path, {"a.txt": CLEAN, "b/c.md": "ok\n"}))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert rec["schema"] == "vertciti-data-room-gate/1"
+    assert rec["result"] == "PASS" and rec["exit_code"] == 0
+    assert rec["files_scanned"] == 2 and len(rec["files_manifest_sha256"]) == 64
+    assert rec["pattern_set"]["mode"] == "skeleton" and rec["findings"] == []
+    assert len(rec["allowlist_sha256"]) == 64 and len(rec["script_sha256"]) == 64
+
+
+@needs_bash
+def test_gate_record_lists_locations_never_content(tmp_path: Path) -> None:
+    token = "ghp_" + "q" * 24
+    data = _data(tmp_path, {"a.txt": "ok\nkey " + token + "\n",
+                            "x.bin": b"\x00\x01binary"})
+    res, rec = _record(tmp_path, data)
+    assert res.returncode == 1
+    assert rec["result"] == "FAIL" and rec["exit_code"] == 1
+    assert {"rule": "rule4", "severity": "fail", "path": "a.txt", "line": 2} in rec["findings"]
+    assert {"rule": "binary", "severity": "fail", "path": "x.bin", "line": None} in rec["findings"]
+    assert token not in (tmp_path / "record.json").read_text(encoding="utf-8")
+
+
+@needs_bash
+def test_gate_record_skeleton_non_binding(tmp_path: Path) -> None:
+    res, rec = _record(tmp_path, _data(tmp_path, {"a.txt": CLEAN}), GATE_ALLOW_SKELETON="0")
+    assert res.returncode == 3
+    assert rec["result"] == "NON-BINDING" and rec["exit_code"] == 3
+
+
+@needs_bash
+def test_gate_record_written_on_early_fail_closed_exit(tmp_path: Path) -> None:
+    res, rec = _record(tmp_path, _data(tmp_path, {}))  # empty dir exits early
+    assert res.returncode == 1
+    assert rec["result"] == "FAIL" and rec["files_scanned"] == 0
+
+
+@needs_bash
+def test_gate_record_requested_but_unwritable_fails(tmp_path: Path) -> None:
+    out = tmp_path / "no-such-dir" / "record.json"
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}),
+                    env={"GATE_JSON_OUT": str(out)})
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "运行记录写入失败" in res.stderr
+
+
+@needs_bash
+def test_gate_without_record_env_writes_nothing(tmp_path: Path) -> None:
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}))
+    assert res.returncode == 0
+    assert not list(tmp_path.glob("*.json"))
