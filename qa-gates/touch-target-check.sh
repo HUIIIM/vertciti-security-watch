@@ -26,7 +26,7 @@ set -u
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "用法: ./touch-target-check.sh [--help] [URL]"
   echo "  390px 触控目标门禁：无参数时经环境变量 TOUCH_TARGET_PROD_FILE 测生产源文件，传 URL 测任意地址（如 https://vertciti.com/）。"
-  echo "  路由表可经 TOUCH_TARGET_ROUTES 覆盖（空格分隔；以 / 开头为真实路径，否则为 #page= 路由名）。所有路由渲染结果相同即 FAIL（路由表与站点不符）。"
+  echo "  路由表可经 TOUCH_TARGET_ROUTES 覆盖（空格分隔；以 / 开头为真实路径，否则为 #page= 路由名）；环境变量未设时读脚本同目录的 touch-target-routes.txt（发布管线定版表）。所有路由渲染结果相同即 FAIL（路由表与站点不符）。"
   echo "  依赖: playwright (解释器经环境变量 TOUCH_TARGET_PYTHON 指定) + /opt/meta-chromium/chrome"
   exit 0
 fi
@@ -49,6 +49,23 @@ fi
 if [ ! -x "$PY" ]; then
   echo "[FAIL] python not found: $PY" >&2
   exit 2
+fi
+
+# Route-table config: TOUCH_TARGET_ROUTES (env) wins; when unset, read the
+# pipeline-set table from touch-target-routes.txt next to this script; when
+# that file is absent too, the Python below falls back to its built-in
+# hash-route defaults. The effective source is logged so a gate run shows
+# which table it measured with.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROUTES_FILE="$SCRIPT_DIR/touch-target-routes.txt"
+if [ -n "${TOUCH_TARGET_ROUTES:-}" ]; then
+  echo "[routes] source=env routes=$TOUCH_TARGET_ROUTES" >&2
+elif [ -f "$ROUTES_FILE" ]; then
+  TOUCH_TARGET_ROUTES="$(grep -v '^[[:space:]]*#' "$ROUTES_FILE" | tr '\n' ' ' | tr -s ' ' | sed 's/^ //; s/ $//')"
+  export TOUCH_TARGET_ROUTES
+  echo "[routes] source=file ($ROUTES_FILE) routes=$TOUCH_TARGET_ROUTES" >&2
+else
+  echo "[routes] source=default (built-in hash routes)" >&2
 fi
 
 "$PY" - "$URL" <<'PY_EOF'

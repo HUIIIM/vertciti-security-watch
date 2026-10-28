@@ -1,0 +1,7 @@
+# Gate 3 (touch-target-check.sh) production route table for https://vertciti.com
+# Verified 2026-10-27 against the live sitemap (65 URLs) and the homepage link
+# surface: all six paths return HTTP 200 with distinct layouts. /contact/ is the
+# site's only form page (inputs/submit are the highest-risk touch-target family).
+# The script reads this file when TOUCH_TARGET_ROUTES is not set in the
+# environment (environment wins). Lines starting with # are comments.
+/ /business/ /data-room/ /company/ /accessibility/ /contact/
