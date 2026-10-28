@@ -26,8 +26,8 @@ vertciti.com 每次生产发布前要过三道门禁，全部脚本化：敏感�
 | # | 门禁 / 工具 | 脚本 | 判定 |
 |---|---|---|---|
 | 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | 扫描目录内全部文件（不限 .txt）。FAIL：私钥 / `ghp_` 等 token / 规则 2 停发字样 / 规则 1 封存日期及其各种写法 / 无法按文本扫描的文件（二进制、不可读）/ 目录为空。WARN（人工复核）：口令赋值、邮箱地址。命中默认脱敏输出（`路径:行号` + 掩码/指纹），不回显明文 |
-| 2 | 首页可访问 | `curl -sI https://vertciti.com/` | 非 200 即 FAIL（在部署任务内执行） |
-| 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕。页面返回非 2xx、出现 JS 报错或某条路由量不到任何可交互元素时也 FAIL |
+| 2 | 首页可访问 | `qa-gates/homepage-200-check.sh [URL]` | 站点自身返回的状态码非 200（含重定向、4xx/5xx、连接失败、超时）即 FAIL |
+| 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕。页面返回非 2xx、出现 JS 报错或某条路由量不到任何可交互元素时也 FAIL；所有路由渲染出相同布局时 FAIL（路由表与站点不符，实际只测了一页），真实路由可经 `TOUCH_TARGET_ROUTES` 指定（如 `"/ /business/ /company/"`） |
 | — | 颜色审计 | `security-watch/color-audit.py` | 只读：提取首页内联 CSS 与 `style=` 中的全部色值并统计 |
 | — | box-shadow 审计 | `security-watch/shadow-audit.py` | 只读：列出首页每条 box-shadow 声明的选择器、行号与取值 |
 | — | allowlist | `security-watch/gate-allowlist.txt` | 门禁 1 的误报在这里登记：按 `文件:行号:精确内容`（或 `fp:` 指纹）逐实例登记，二进制文件以 `bin:路径:sha256` 登记，子串匹配已废止；部署侧登记为准，仓内文件只有格式说明；审计产物归档在 `security-watch/archive/` |
@@ -43,7 +43,7 @@ bash security-watch/data-room-gate.sh ./data-room   # 骨架运行：无 FAIL �
 
 ```bash
 bash qa-gates/touch-target-check.sh https://vertciti.com/  # 门禁 3：390px 触控目标
-curl -sI https://vertciti.com/ | head -1                   # 门禁 2：首页 200
+bash qa-gates/homepage-200-check.sh https://vertciti.com/  # 门禁 2：首页 200
 ```
 
 开发检查：
@@ -67,7 +67,7 @@ vertciti-security-watch/
 └── docs/             # PRODUCT.md 与 assets
 ```
 
-每道门禁是独立脚本，以退出码向发布流水线报告结果；门禁 2 是部署任务里的一条 `curl`。架构图见
+每道门禁是独立脚本，以退出码向发布流水线报告结果；门禁 2 为 `qa-gates/homepage-200-check.sh`（此前只是文档里一条 `curl -sI … | head -1`，退出码恒为 0）。架构图见
 [docs/assets/architecture.png](docs/assets/architecture.png)。
 
 ## 安全与合规

@@ -20,7 +20,7 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
 
 ## 怎么用（三步）/ How to use
 1. 门禁 1 / Gate 1：`bash security-watch/data-room-gate.sh [目录]` — 扫描 `*.txt`，FAIL 时 exit 1。
-2. 门禁 2 / Gate 2：`curl -sI https://vertciti.com/ | head -1` — 期望 HTTP 200。
+2. 门禁 2 / Gate 2：`qa-gates/homepage-200-check.sh` — 站点自身状态码必须为 HTTP 200，否则 exit 1。
 3. 门禁 3 / Gate 3：`bash qa-gates/touch-target-check.sh [URL]` — 390px 视口下可交互元素宽高均需 ≥ 44px；依赖 playwright（解释器经环境变量 `TOUCH_TARGET_PYTHON` 指定）与 `/opt/meta-chromium/chrome`。
 
 另有两个只读审计脚本 / Two read-only audit scripts：`security-watch/color-audit.py <index.html> [--json out.json]`（色值统计与聚类）、`security-watch/shadow-audit.py [--json PATH] [--table]`（box-shadow 逐项清单）。

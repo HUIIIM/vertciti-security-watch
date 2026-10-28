@@ -10,6 +10,8 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- 门禁 2 落成脚本 `qa-gates/homepage-200-check.sh`：取站点自身状态码（`curl -w '%{http_code}'`，不跟随重定向），非 200 / 连接失败 / 超时即 exit 1。此前只是文档里的 `curl -sI … | head -1`，退出码恒为 0，且在代理后读到的是代理的 CONNECT 200（#6 ARCH-6）/ gate 2 is now a real script.
+- 门禁 3 覆盖面自检：所有路由渲染出完全相同的可交互布局即 FAIL——#6 实测线上站点用真实路径导航、不认 `#page=` 路由，门禁实际是把首页测了 14 遍；新增 `TOUCH_TARGET_ROUTES` 指定真实路由（以 `/` 开头按路径访问）/ gate 3 fails when every route renders the same page; real routes via TOUCH_TARGET_ROUTES.
 - 所有 GitHub Actions 改为按完整 commit SHA 固定（版本号留在行尾注释，供 Dependabot 更新；scorecard-action 顺带升到 v2.5.0，取代 #4），见独立评估 #5 P2-5 / all GitHub Actions pinned to full commit SHAs (assessment #5).
 - CI 测试工具改为按哈希锁定安装：`requirements-dev.in` → `pip-compile --generate-hashes` → `requirements-dev.txt`，CI 用 `pip install --require-hashes`；Dependabot 的 pip 生态此前指向 `/` 却没有任何清单，现在有了（#6 SEC-A5）/ CI test tools installed from a hash-locked requirements-dev.txt.
 - `.github/SECURITY.md` 给出实际的私下报告渠道（GitHub private vulnerability reporting，已启用）；原文只写"直接邮件联系维护者"却没有地址（#5 P2-7）/ SECURITY.md now names a working private reporting channel.

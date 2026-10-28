@@ -466,3 +466,70 @@ def test_gate_skeleton_run_still_fails_on_real_rules(tmp_path: Path) -> None:
     data = _data(tmp_path, {"a.txt": "key ghp_" + "x" * 20 + "\n"})
     res = _run_gate(tmp_path, data, env={"GATE_ALLOW_SKELETON": "0"})
     assert res.returncode == 1, res.stdout
+
+# ---- qa-gates/homepage-200-check.sh (gate 2) ----
+
+QA = ROOT / "qa-gates"
+needs_curl = pytest.mark.skipif(shutil.which("curl") is None, reason="curl not available")
+
+
+@pytest.fixture
+def http_server():
+    """Local server answering GET /<code> with that HTTP status."""
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            code = int(self.path.strip("/") or "200")
+            self.send_response(code)
+            if 300 <= code < 400:
+                self.send_header("Location", "/200")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield "http://127.0.0.1:%d" % srv.server_address[1]
+    srv.shutdown()
+
+
+def _run_gate2(url: str) -> subprocess.CompletedProcess:
+    env = {**os.environ, "NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1",
+           "HOMEPAGE_CHECK_TIMEOUT": "5"}
+    return subprocess.run(
+        ["bash", str(QA / "homepage-200-check.sh"), url],
+        capture_output=True, text=True, env=env, check=False,
+    )
+
+
+@needs_bash
+@needs_curl
+def test_gate2_passes_on_200(http_server: str) -> None:
+    res = _run_gate2(http_server + "/200")
+    assert res.returncode == 0, res.stdout
+    assert "[PASS]" in res.stdout
+
+
+@needs_bash
+@needs_curl
+@pytest.mark.parametrize("code", [301, 404, 500, 503])
+def test_gate2_fails_on_non_200(http_server: str, code: int) -> None:
+    res = _run_gate2("%s/%d" % (http_server, code))
+    assert res.returncode == 1, res.stdout
+    assert "HTTP %d" % code in res.stdout
+
+
+@needs_bash
+@needs_curl
+def test_gate2_fails_when_unreachable() -> None:
+    import socket
+
+    with socket.socket() as s:  # grab a free port, then close it: nothing listens there
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    res = _run_gate2("http://127.0.0.1:%d/" % port)
+    assert res.returncode == 1, res.stdout
+    assert "请求失败" in res.stdout

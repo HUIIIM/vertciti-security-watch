@@ -26,6 +26,7 @@ set -u
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "用法: ./touch-target-check.sh [--help] [URL]"
   echo "  390px 触控目标门禁：无参数时经环境变量 TOUCH_TARGET_PROD_FILE 测生产源文件，传 URL 测任意地址（如 https://vertciti.com/）。"
+  echo "  路由表可经 TOUCH_TARGET_ROUTES 覆盖（空格分隔；以 / 开头为真实路径，否则为 #page= 路由名）。所有路由渲染结果相同即 FAIL（路由表与站点不符）。"
   echo "  依赖: playwright (解释器经环境变量 TOUCH_TARGET_PYTHON 指定) + /opt/meta-chromium/chrome"
   exit 0
 fi
@@ -61,6 +62,23 @@ BASE = URL.split("#")[0]
 # 路由名取自生产 index.html 源码 JS (2026-09-27 核验); 无 demo 路由, 故不测。
 ROUTES = ["home", "catalog", "design", "docs", "landscape", "product", "roadmap"]
 LANGS = ["zh", "en"]
+# 环境变量 TOUCH_TARGET_ROUTES (空格分隔) 覆盖路由表: 以 "/" 开头的条目按真实路径
+# 访问 (相对 URL 的 origin, 如 "/ /business/ /company/"), 其余按 #page=<名>&lang=<语言> 访问。
+# (#6 实测: 线上站点用真实路径导航, 不认 #page= hash 路由。)
+if os.environ.get("TOUCH_TARGET_ROUTES", "").strip():
+    ROUTES = os.environ["TOUCH_TARGET_ROUTES"].split()
+
+
+def targets():
+    """(key, url) for every page to measure."""
+    from urllib.parse import urljoin
+    for route in ROUTES:
+        if route.startswith("/"):
+            yield route, urljoin(BASE, route)
+        else:
+            for lang in LANGS:
+                key = "#page=%s&lang=%s" % (route, lang)
+                yield key, BASE + key
 MIN = 44.0
 
 JS_COLLECT = """() => {
@@ -108,26 +126,34 @@ with sync_playwright() as pw:
                               has_touch=True, is_mobile=True)
     page = ctx.new_page()
     page.on("pageerror", lambda exc: errors.append("JS error: %s" % exc))
-    for route in ROUTES:
-        for lang in LANGS:
-            key = "#page=%s&lang=%s" % (route, lang)
-            resp = page.goto(BASE + key)
-            # 同文档 hash 跳转时 goto 返回 None; 有响应时必须 2xx (5xx/404 错误页不能算通过)
-            if resp is not None and not resp.ok:
-                errors.append("%s: HTTP %d" % (key, resp.status))
-            page.wait_for_timeout(2500)  # 等 hash 路由 + JS 按需渲染
-            els = page.evaluate(JS_COLLECT)
-            if not els:
-                errors.append("%s: 0 interactive elements (blank/error page?)" % key)
-            n_check = n_ex = 0
-            for e in els:
-                if e["inlineLink"]:
-                    exempt.append((key, e)); n_ex += 1; continue
-                n_check += 1
-                if e["w"] < MIN or e["h"] < MIN:
-                    violations.append((key, e))
-            stats[key] = (n_check, n_ex)
+    layouts = {}      # key -> 可交互元素布局签名, 用于识别"路由没生效、反复测同一页"
+    for key, url in targets():
+        resp = page.goto(url)
+        # 同文档 hash 跳转时 goto 返回 None; 有响应时必须 2xx (5xx/404 错误页不能算通过)
+        if resp is not None and not resp.ok:
+            errors.append("%s: HTTP %d" % (key, resp.status))
+        page.wait_for_timeout(2500)  # 等 hash 路由 + JS 按需渲染
+        els = page.evaluate(JS_COLLECT)
+        if not els:
+            errors.append("%s: 0 interactive elements (blank/error page?)" % key)
+        layouts[key] = tuple((e["selector"], e["text"], e["w"], e["h"], e["x"], e["y"])
+                             for e in els)
+        n_check = n_ex = 0
+        for e in els:
+            if e["inlineLink"]:
+                exempt.append((key, e)); n_ex += 1; continue
+            n_check += 1
+            if e["w"] < MIN or e["h"] < MIN:
+                violations.append((key, e))
+        stats[key] = (n_check, n_ex)
     browser.close()
+
+# 覆盖面自检: 多条路由渲染出完全相同的可交互布局 = 路由表没生效, 实际只测了一页,
+# 却报告测了 N 条路由。改用 TOUCH_TARGET_ROUTES 指定站点真实路由。
+if len(layouts) > 1 and len(set(layouts.values())) == 1:
+    errors.append("all %d routes rendered an identical interactive layout: the route table "
+                  "does not match this site, so only one page was really measured "
+                  "(set TOUCH_TARGET_ROUTES, e.g. \"/ /business/ /company/\")" % len(layouts))
 
 print("=" * 70)
 print("touch-target gate | URL=%s | viewport=390px | min=%dpx" % (URL, MIN))

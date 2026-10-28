@@ -10,7 +10,7 @@ repository, but well-scoped contributions are welcome.
 2. **Use a valid commit email** (your GitHub noreply or account email).
 3. **Conventional commits**: `feat:`, `fix:`, `docs:`, `ci:`, `chore:`, `refactor:`.
 4. **Tests are the gate**: run the project's test suite before pushing
-   (`pytest -q` for Python, `npm test` for Node). Lint is advisory; tests must pass.
+   (`pytest -q` for Python, `npm test` for Node). Lint (`ruff check .`) and tests both block CI and must pass.
 5. **One concern per PR**; keep diffs reviewable.
 
 ## Workflow
