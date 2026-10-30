@@ -555,7 +555,8 @@ QA = ROOT / "qa-gates"
 
 
 def _run_touch_target(tmp_path: Path, *, with_routes_file: bool,
-                      env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+                      env: dict[str, str] | None = None,
+                      url: str = "https://example.invalid/") -> subprocess.CompletedProcess:
     """Run a copy of gate 3 with a stub python that reports the routes it saw.
 
     The stub drains the embedded Python from stdin and prints the effective
@@ -579,7 +580,7 @@ def _run_touch_target(tmp_path: Path, *, with_routes_file: bool,
     run_env["TOUCH_TARGET_PYTHON"] = str(stub)
     run_env.update(env or {})
     return subprocess.run(
-        ["bash", str(script), "https://example.invalid/"],
+        ["bash", str(script), url],
         capture_output=True, text=True, check=False, env=run_env,
     )
 
@@ -664,3 +665,13 @@ def test_gate_without_record_env_writes_nothing(tmp_path: Path) -> None:
     res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}))
     assert res.returncode == 0
     assert not list(tmp_path.glob("*.json"))
+
+
+@needs_bash
+def test_gate3_routes_file_not_applied_to_file_url(tmp_path: Path) -> None:
+    # the file lists live-site paths; on a file:// target "/business/" would
+    # resolve to file:///business/ (filesystem root), so hash routes stay
+    res = _run_touch_target(tmp_path, with_routes_file=True,
+                            url="file:///srv/deploy-prod-root/index.html")
+    assert "source=default" in res.stderr
+    assert "SAW_ROUTES=<unset>" in res.stdout

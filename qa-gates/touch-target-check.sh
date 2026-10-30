@@ -58,8 +58,14 @@ fi
 # which table it measured with.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROUTES_FILE="$SCRIPT_DIR/touch-target-routes.txt"
+# The file holds the live site's real paths, so it only applies to http(s)
+# targets: for a file:// target (the production index.html, which routes by
+# #page= hash) "/business/" would resolve against file:/// - the filesystem
+# root - so file:// keeps the built-in hash routes.
 if [ -n "${TOUCH_TARGET_ROUTES:-}" ]; then
   echo "[routes] source=env routes=$TOUCH_TARGET_ROUTES" >&2
+elif [ -f "$ROUTES_FILE" ] && [[ "$URL" != http://* && "$URL" != https://* ]]; then
+  echo "[routes] source=default (built-in hash routes; $ROUTES_FILE lists site paths and applies to http(s) targets only)" >&2
 elif [ -f "$ROUTES_FILE" ]; then
   TOUCH_TARGET_ROUTES="$(grep -v '^[[:space:]]*#' "$ROUTES_FILE" | tr '\n' ' ' | tr -s ' ' | sed 's/^ //; s/ $//')"
   export TOUCH_TARGET_ROUTES
@@ -90,6 +96,11 @@ def targets():
     """(key, url) for every page to measure."""
     from urllib.parse import urljoin
     for route in ROUTES:
+        if route.startswith("/") and not BASE.startswith(("http://", "https://")):
+            # a site path has no meaning for a file:// target: it would resolve
+            # against file:/// (the filesystem root) and "measure" that instead
+            errors.append("%s: path routes need an http(s) URL, got %s" % (route, BASE))
+            continue
         if route.startswith("/"):
             yield route, urljoin(BASE, route)
         else:
