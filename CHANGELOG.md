@@ -10,6 +10,7 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- 门禁 3：`touch-target-routes.txt`（站点真实路径）只用于 http(s) 目标。此前它也作用于 `file://` 目标（README 的无参数模式：测生产 `index.html`），`/business/` 被解析成 `file:///business/`（文件系统根目录），该模式先"测"了根目录列表再崩溃退出；现 `file://` 目标沿用内置 hash 路由，若经环境变量强行给 `file://` 指定路径路由则明确 FAIL / gate 3 applies the routes file to http(s) targets only.
 - 门禁 1 机器可读运行记录：设 `GATE_JSON_OUT=<路径>` 时，每次运行（含中途 fail-closed 退出）结束都写 JSON——结果与退出码、模式集形态与 sha256、allowlist 与脚本 sha256、被扫文件清单指纹（相对路径 + 文件 sha256）、每条命中的规则/级别/相对路径/行号，**不含命中内容**；要求了记录却写不出即 exit 1（#6 OPS-2、§4c-1）/ gate 1 writes an optional machine-readable run record (locations only, never content).
 - 门禁 1：数据目录内的符号链接改为 FAIL。`grep -r` 不跟随、`find -type f` 不计数，链接目标却可能随发布带出（#6 复现 G2）/ gate 1 fails on symlinks.
 - 门禁 3：完全移出页面的元素（如 `left:-9999px` 的跳转链接）不再误报为触控违规（#6 §2.2）/ gate 3 ignores fully off-page elements.
