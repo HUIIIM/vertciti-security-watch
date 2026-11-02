@@ -664,3 +664,26 @@ def test_gate_without_record_env_writes_nothing(tmp_path: Path) -> None:
     res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}))
     assert res.returncode == 0
     assert not list(tmp_path.glob("*.json"))
+
+
+
+# ---- shadow-audit.py --expect (opt-in declaration-count check) ----
+
+def _shadow(tmp_path: Path, *extra: str) -> subprocess.CompletedProcess:
+    html = tmp_path / "i.html"
+    html.write_text("<style>a{box-shadow:none}b{box-shadow:0 0 1px #000}</style>",
+                    encoding="utf-8")
+    return subprocess.run(["python3", str(SW / "shadow-audit.py"), str(html), *extra],
+                          capture_output=True, text=True, check=False)
+
+
+def test_shadow_no_expect_no_warning(tmp_path: Path) -> None:
+    res = _shadow(tmp_path)
+    assert res.returncode == 0 and "WARN" not in res.stderr
+
+
+def test_shadow_expect_match_and_mismatch(tmp_path: Path) -> None:
+    assert _shadow(tmp_path, "--expect", "2").returncode == 0
+    res = _shadow(tmp_path, "--expect", "71")
+    assert res.returncode == 1 and "2 != expected 71" in res.stderr
+    assert _shadow(tmp_path, "--expect", "x").returncode == 2
