@@ -3,7 +3,8 @@
 扫描目标 index.html 内所有 box-shadow 声明（文件路径经第一个位置参数
 或环境变量 SHADOW_AUDIT_SRC 传入，无内置默认目标）,
 输出: 选择器 / 行号 / 完整值 / 是否 none / 是否 @media 内.
-用法: python3 shadow-audit.py [INDEX.html] [--json PATH] [--table]
+用法: python3 shadow-audit.py [INDEX.html] [--json PATH] [--table] [--expect N]
+      --expect N: 声明数不等于 N 时报 WARN 并以 1 退出（回归核对用，默认不核对）
       SHADOW_AUDIT_SRC=/path/to/index.html python3 shadow-audit.py
 """
 import json
@@ -60,10 +61,18 @@ def main():
     json_path = None
     want_table = False
     src_arg = None
+    expect = None
     i = 0
     while i < len(args):
         if args[i] == "--json" and i + 1 < len(args):
             json_path = args[i + 1]
+            i += 2
+        elif args[i] == "--expect" and i + 1 < len(args):
+            try:
+                expect = int(args[i + 1])
+            except ValueError:
+                print("--expect needs an integer, got %r" % args[i + 1], file=sys.stderr)
+                return 2
             i += 2
         elif args[i] == "--table":
             want_table = True
@@ -76,7 +85,7 @@ def main():
 
     src_path = src_arg or os.environ.get("SHADOW_AUDIT_SRC", "")
     if not src_path:
-        print("usage: shadow-audit.py [INDEX.html] [--json PATH] [--table]\n"
+        print("usage: shadow-audit.py [INDEX.html] [--json PATH] [--table] [--expect N]\n"
               "  target index.html: first positional argument, "
               "or the SHADOW_AUDIT_SRC environment variable",
               file=sys.stderr)
@@ -138,8 +147,13 @@ def main():
                 x["n"], sel, x["line"], vs,
                 "Y" if x["is_none"] else "", "Y" if x["in_media"] else ""))
     print(json.dumps(summary, ensure_ascii=False, indent=1))
-    if summary["declarations"] != 71:
-        print("WARN: declaration count != 71", file=sys.stderr)
+    # 期望声明数只在显式给出时核对：此前写死 71（2026-09-27 快照的数目），
+    # 对任何其他页面都报 WARN，成了噪声。
+    if expect is not None and summary["declarations"] != expect:
+        print("WARN: declaration count %d != expected %d" % (summary["declarations"], expect),
+              file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

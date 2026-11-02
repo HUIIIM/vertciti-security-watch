@@ -29,6 +29,7 @@ yet, so everything is listed under Unreleased, derived from `git log`.
   浏览器路径可经 `TOUCH_TARGET_CHROME` 覆盖 / gate 3 fails on non-2xx, JS errors and empty routes.
 
 ### Fixed
+- `shadow-audit.py`：去掉写死的 "declaration count != 71" 警告（2026-09-27 快照的数目，对其他页面恒报 WARN）；改为可选 `--expect N`，不等即 WARN 并 exit 1（#26）/ the declaration-count check is now opt-in via --expect N.
 - `color-audit.py`：`--json` 缺少路径时给出用法提示而非 IndexError；越界色值分量按 CSS 规则钳位 / usage error and component clamping.
 
 ### Added
