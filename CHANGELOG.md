@@ -10,6 +10,7 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- 门禁 3：Chromium 沙箱默认开启（此前恒以 `--no-sandbox` 渲染被测页面并执行其 JS；且 Playwright 默认 `chromium_sandbox=False` 会自行关沙箱，现显式传 True）。仅在以 root 运行（Chromium 拒绝 root 下沙箱）或设 `TOUCH_TARGET_NO_SANDBOX=1` 时关闭，运行日志 `[sandbox]` 行注明（#6 SEC-A3、#26）/ gate 3 runs Chromium sandboxed by default.
 - 门禁 1 机器可读运行记录：设 `GATE_JSON_OUT=<路径>` 时，每次运行（含中途 fail-closed 退出）结束都写 JSON——结果与退出码、模式集形态与 sha256、allowlist 与脚本 sha256、被扫文件清单指纹（相对路径 + 文件 sha256）、每条命中的规则/级别/相对路径/行号，**不含命中内容**；要求了记录却写不出即 exit 1（#6 OPS-2、§4c-1）/ gate 1 writes an optional machine-readable run record (locations only, never content).
 - 门禁 1：数据目录内的符号链接改为 FAIL。`grep -r` 不跟随、`find -type f` 不计数，链接目标却可能随发布带出（#6 复现 G2）/ gate 1 fails on symlinks.
 - 门禁 3：完全移出页面的元素（如 `left:-9999px` 的跳转链接）不再误报为触控违规（#6 §2.2）/ gate 3 ignores fully off-page elements.
