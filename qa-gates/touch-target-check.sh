@@ -28,6 +28,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "  390px 触控目标门禁：无参数时经环境变量 TOUCH_TARGET_PROD_FILE 测生产源文件，传 URL 测任意地址（如 https://vertciti.com/）。"
   echo "  路由表可经 TOUCH_TARGET_ROUTES 覆盖（空格分隔；以 / 开头为真实路径，否则为 #page= 路由名）；环境变量未设时读脚本同目录的 touch-target-routes.txt（发布管线定版表）。所有路由渲染结果相同即 FAIL（路由表与站点不符）。"
   echo "  依赖: playwright (解释器经环境变量 TOUCH_TARGET_PYTHON 指定) + /opt/meta-chromium/chrome"
+  echo "  Chromium 沙箱默认开启；以 root 运行或设 TOUCH_TARGET_NO_SANDBOX=1 时关闭（运行日志 [sandbox] 行注明）。"
   exit 0
 fi
 
@@ -150,9 +151,19 @@ stats = {}        # route_key -> (checked, exempted)
 errors = []       # 加载失败 / JS 报错 / 空路由: 一律 FAIL, 不允许在没量到东西时报 PASS
 
 with sync_playwright() as pw:
+    # Chromium 沙箱默认开启（被测页面的 JS 在此执行；#6 SEC-A3）。只在两种情况下关闭：
+    # 以 root 运行（Chromium 拒绝在 root 下启用沙箱："Chromium sandboxing failed!"），
+    # 或显式设 TOUCH_TARGET_NO_SANDBOX=1。注意 Playwright 的 chromium_sandbox 默认为
+    # False（会自行加 --no-sandbox），所以必须显式传 True 才真正开启沙箱。
+    no_sandbox = (os.environ.get("TOUCH_TARGET_NO_SANDBOX") == "1"
+                  or (hasattr(os, "geteuid") and os.geteuid() == 0))
+    print("[sandbox] chromium sandbox=%s%s" % (
+        "off" if no_sandbox else "on",
+        " (root or TOUCH_TARGET_NO_SANDBOX=1)" if no_sandbox else ""), file=sys.stderr)
     browser = pw.chromium.launch(
         executable_path=os.environ.get("TOUCH_TARGET_CHROME", "/opt/meta-chromium/chrome"),
-        args=["--no-sandbox", "--disable-dev-shm-usage"])  # 2026-09-27: /dev/shm 仅 794M, 10MB 大页必 crash, 加此 flag 稳定
+        chromium_sandbox=not no_sandbox,
+        args=["--disable-dev-shm-usage"])  # 2026-09-27: /dev/shm 仅 794M, 10MB 大页必 crash, 加此 flag 稳定
     ctx = browser.new_context(viewport={"width": 390, "height": 844},
                               has_touch=True, is_mobile=True)
     page = ctx.new_page()
