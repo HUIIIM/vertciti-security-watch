@@ -82,7 +82,7 @@ vertciti-security-watch/
 内部工具，维护中，尚无带版本号的发布；变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 已知限制：
-- 门禁 1 为双层形态（GC-20261027-002）：仓内 `gate-patterns-skeleton.txt` 只是结构骨架（真合成模式），不是完整门禁；具约束力的发布运行装载部署侧私有全量模式集并先验 sha256 指纹，不符或缺失即 fail-closed 停发、不回退骨架判定。未装载全量模式集的骨架运行在无 FAIL 时以 exit 3（NON-BINDING）结束，不会以 0 被流水线当作放行；本地调试/测试可设 `GATE_ALLOW_SKELETON=1` 恢复 0。
+- 门禁 1 为双层形态（2026-10-27 双层化）：仓内 `gate-patterns-skeleton.txt` 只是结构骨架（真合成模式），不是完整门禁；具约束力的发布运行装载部署侧私有全量模式集并先验 sha256 指纹，不符或缺失即 fail-closed 停发、不回退骨架判定。未装载全量模式集的骨架运行在无 FAIL 时以 exit 3（NON-BINDING）结束，不会以 0 被流水线当作放行；本地调试/测试可设 `GATE_ALLOW_SKELETON=1` 恢复 0。
   A skeleton run (no full pattern set loaded) never exits 0: without a FAIL it ends with exit 3 (NON-BINDING); `GATE_ALLOW_SKELETON=1` restores exit 0 for local/test use only.
   Gate 1 is two-tier: the in-repo pattern file is a synthetic skeleton, not the complete gate; binding release runs load the deployment-side full pattern set and verify its registered sha256 fingerprint first, failing closed on any mismatch.
 - `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发；缺失/不可读时 fail-closed 停发，

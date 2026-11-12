@@ -23,7 +23,7 @@
 #   - 不再按 "classification" 整行豁免规则 2 字样（标注为最高密级的行本身就该停发）；
 #   - 规则 1 覆盖封存日期的多种写法变体；规则 4 增加 github_pat_、ghs_/ghu_/ghr_、
 #     sk-ant-、AIza 等 token 前缀。
-# 2026-10-27 (GC-20261027-002) 模式集双层化（判据内容不变，只动存放与装载形态）：
+# 2026-10-27 模式集双层化（判据内容不变，只动存放与装载形态）：
 #   - 六条规则的模式串不再内嵌脚本。仓内随脚本分发的是结构骨架
 #     gate-patterns-skeleton.txt（真合成模式，供结构测试与非约束性运行，
 #     它不是完整门禁）；具约束力的全量模式集存放于部署侧私有面，发布运行经
@@ -142,7 +142,7 @@ grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*#' "$ALLOWLIST_SRC" > "$EFF"
 GRC=$?
 if [ "$GRC" -ge 2 ]; then echo "GATE FAIL: allowlist 读取错误 $ALLOWLIST_SRC —— fail-closed 停发"; exit 1; fi
 
-# ---- 模式集装载（双层形态，GC-20261027-002）----
+# ---- 模式集装载（双层形态）----
 # 模式集行格式：<规则>.<字段> <模式（至行尾）>；字段 pattern / exclude（仅规则 5）。
 # 骨架（默认）：脚本同目录 gate-patterns-skeleton.txt，合成模式，非约束性运行。
 # 全量集：GATE_PATTERN_FILE 指定部署侧私有文件，运行前必须验指纹。
