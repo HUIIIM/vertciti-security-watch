@@ -675,3 +675,24 @@ def test_gate3_routes_file_not_applied_to_file_url(tmp_path: Path) -> None:
                             url="file:///srv/deploy-prod-root/index.html")
     assert "source=default" in res.stderr
     assert "SAW_ROUTES=<unset>" in res.stdout
+
+# ---- shadow-audit.py --expect (opt-in declaration-count check) ----
+
+def _shadow(tmp_path: Path, *extra: str) -> subprocess.CompletedProcess:
+    html = tmp_path / "i.html"
+    html.write_text("<style>a{box-shadow:none}b{box-shadow:0 0 1px #000}</style>",
+                    encoding="utf-8")
+    return subprocess.run(["python3", str(SW / "shadow-audit.py"), str(html), *extra],
+                          capture_output=True, text=True, check=False)
+
+
+def test_shadow_no_expect_no_warning(tmp_path: Path) -> None:
+    res = _shadow(tmp_path)
+    assert res.returncode == 0 and "WARN" not in res.stderr
+
+
+def test_shadow_expect_match_and_mismatch(tmp_path: Path) -> None:
+    assert _shadow(tmp_path, "--expect", "2").returncode == 0
+    res = _shadow(tmp_path, "--expect", "71")
+    assert res.returncode == 1 and "2 != expected 71" in res.stderr
+    assert _shadow(tmp_path, "--expect", "x").returncode == 2
