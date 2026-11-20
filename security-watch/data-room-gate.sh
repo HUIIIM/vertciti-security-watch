@@ -41,7 +41,34 @@
 #   脚本 sha256、被扫文件清单指纹（相对路径+文件 sha256，排序后再取 sha256），以及每条
 #   命中的 规则/级别/相对路径/行号——只有位置，不含任何命中内容。要求了记录却写不出来
 #   （如缺 python3）即 exit 1，不让流水线在缺证据时放行。
+# 2026-11-20 (#6 评分卡 门禁 1 批次 1) 退出码契约、规则 4 补全、记录/指纹加固：
+#   - 退出码契约（调用方据此区分，不得把非 0 一律当失败、也不得把 0 与 4 混同）：
+#       exit 0  PASS         无任何命中，可放行（仅全量模式集运行；骨架运行见 3）
+#       exit 1  FAIL         FAIL 级命中或任一 fail-closed 条件，停发
+#       exit 2  USAGE        用法错误（未指定 data-room 目录）
+#       exit 3  NON-BINDING  骨架运行（未装载全量模式集）且无 FAIL，不是放行依据
+#       exit 4  WARN         仅有 WARN 级命中（口令赋值/邮箱），须人工复核后才可放行；
+#                            此前 WARN 与 PASS 同为 0、不可区分
+#     优先级：1 > 3 > 4 > 0（有 FAIL 即 1；无 FAIL 的骨架运行为 3，即便另有 WARN；其后才是 4/0）。
+#     GATE_ALLOW_SKELETON=1 的本地/测试运行：无命中 0、仅 WARN 为 4。
+#   - 规则 4 补 OpenAI sk-proj-、GitLab glpat-、npm_、JWT、aws_secret_access_key 赋值、
+#     Stripe/Restricted *_test_、Twilio SK、SendGrid SG.、Slack webhook URL、
+#     数据库连接串内联口令（postgres/mysql/mongodb/redis/amqp://用户:口令@）；
+#   - 命中输出掩码不得保留任何凭据字符：URL/连接串 userinfo 口令一律整段掩码，
+#     真实邮箱仍保留首字符（此前 postgres://u:Zebra9@h 输出 Z****@h，泄露口令首字符）；
+#   - grep 输出改用 -Z（路径后接 NUL）解析，路径与行号不再因行内容形如 ref:2:… 或路径含 :数字: 而错位；
+#   - 模式集严格校验（骨架与全量集同一检查）：每行必须是 "<规则>.<字段> <非空模式>"，六条规则的
+#     pattern 与规则 5 exclude 须齐全且各出现且仅出现一次，缺空格/空值/重复/未知条目一律 exit 1
+#     （此前只有 "1.pattern" 而无模式正文的行会把键名本身当作字面正则通过完整性检查）；
+#   - 运行记录增加 run_id（UUIDv4）与 gate_version（本脚本版本，见 GATE_VERSION）；
+#   - 命中指纹 fp 改为完整 64 位十六进制 SHA-256；设环境变量 GATE_FP_KEY 时改用以其为密钥的
+#     HMAC-SHA256。allowlist 的 fp: 条目与输出指纹走同一函数（fp_hex）：设了密钥后，
+#     只有按同一密钥算出的 fp: 条目才生效，无密钥算出的条目不再生效（须重新登记）。
+#     残余风险：无 GATE_FP_KEY 时指纹仍是未加盐哈希，持日志者可对低熵行内容离线验证猜测
+#     （全长只是不再可碰撞缩短，并不能阻止猜测）；密钥经进程环境传递，泄露即失效。
+#     对低熵内容（日期、短口令）的日志留存环境应设置 GATE_FP_KEY 并将密钥与日志分开存放。
 # 用法：bash data-room-gate.sh [data-room目录]
+GATE_VERSION="1.1.0"
 set -u
 set -o pipefail
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -55,6 +82,8 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "    （或 GATE_PATTERN_FP_FILE=<指纹登记文件>），指纹不符即停发。"
   echo "  骨架运行无 FAIL 时以 exit 3（NON-BINDING）结束，不是放行；GATE_ALLOW_SKELETON=1 仅供本地/测试恢复 exit 0。"
   echo "  GATE_JSON_OUT=<路径>：结束时写机器可读运行记录（JSON，只含命中位置，不含内容）；写不出即 exit 1。"
+  echo "  退出码: exit 0=PASS  exit 1=FAIL  exit 2=用法错误  exit 3=NON-BINDING(骨架)  exit 4=WARN(仅 WARN 级命中，须人工复核)"
+  echo "  GATE_FP_KEY=<密钥>：命中指纹与 allowlist fp: 条目改用 HMAC-SHA256（缺省为未加盐 SHA-256，低熵内容可被离线猜测）。"
   echo "  命中输出默认脱敏；GATE_SHOW_CONTENT=1 输出原文（仅限本机人工复核，禁止在 CI 开启）。"
   exit 0
 fi
@@ -75,16 +104,20 @@ FINDINGS="$WORK_TMP/findings.tsv"; : > "$FINDINGS"   # 规则<TAB>级别<TAB>相
 write_record() {
   local rc="$1" result
   case "$rc" in
-    0) if [ "$WARN" -eq 1 ]; then result=WARN; else result=PASS; fi ;;
+    0) result=PASS ;;
+    4) result=WARN ;;
     1) result=FAIL ;;
     3) result=NON-BINDING ;;
     *) result=ERROR ;;
   esac
   command -v python3 >/dev/null 2>&1 || { echo "GATE FAIL: 要求写运行记录（GATE_JSON_OUT）但缺少 python3" >&2; return 1; }
   python3 -I - "$GATE_JSON_OUT" "$rc" "$result" "$DIR" "${BASH_SOURCE[0]}" "$ALLOWLIST_SRC" \
-      "${PATTERN_SRC:-}" "${GATE_PATTERN_FILE:+full}" "$WORK_TMP/files" "$FINDINGS" <<'PY_EOF'
-import datetime, hashlib, json, os, sys
-out, rc, result, root, script, allowlist, patterns, mode, files, findings = sys.argv[1:11]
+      "${PATTERN_SRC:-}" "${GATE_PATTERN_FILE:+full}" "$WORK_TMP/files" "$FINDINGS" "$GATE_VERSION" <<'PY_EOF'
+import datetime, hashlib, json, os, re, sys, uuid
+out, rc, result, root, script, allowlist, patterns, mode, files, findings, version = sys.argv[1:12]
+
+def unesc(s):
+    return re.sub(r"\\(\\|n|t)", lambda m: {"\\": "\\", "n": "\n", "t": "\t"}[m.group(1)], s)
 
 def sha(path):
     try:
@@ -103,10 +136,13 @@ manifest.sort()
 hits = []
 for row in open(findings, encoding="utf-8", errors="replace"):
     rule, severity, path, line = (row.rstrip("\n").split("\t") + ["", "", "", ""])[:4]
+    path = unesc(path)
     hits.append({"rule": rule, "severity": severity, "path": path or None,
                  "line": int(line) if line.isdigit() else None})
 record = {
     "schema": "vertciti-data-room-gate/1",
+    "run_id": str(uuid.uuid4()),
+    "gate_version": version,
     "finished_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     "result": result,
     "exit_code": int(rc),
@@ -165,22 +201,30 @@ else
   echo "模式集：仓内骨架（合成模式）—— 非约束性运行，判定不作发布依据"
 fi
 PAT1=""; PAT2=""; PAT3=""; PAT4=""; PAT5=""; PAT5X=""; PAT6=""
+# 严格装载（骨架与全量集同一检查）：每行须为 "<规则>.<字段> <非空模式>"，已知键各出现一次；
+# 缺空格（键名本身会被当作字面正则）、空值、重复、未知条目一律 fail-closed。
+pattern_bad() { echo "GATE FAIL: 模式集条目非法（$1）—— fail-closed 停发"; exit 1; }
 while IFS= read -r pline || [ -n "$pline" ]; do
   case "$pline" in ''|'#'*) continue ;; esac
+  case "$pline" in *" "*) ;; *) pattern_bad "缺少空格分隔的模式正文：$pline" ;; esac
   pkey="${pline%% *}"; pval="${pline#* }"
+  [ -n "${pval//[[:space:]]/}" ] || pattern_bad "模式正文为空：$pkey"
   case "$pkey" in
-    1.pattern) PAT1="$pval" ;;
-    2.pattern) PAT2="$pval" ;;
-    3.pattern) PAT3="$pval" ;;
-    4.pattern) PAT4="$pval" ;;
-    5.pattern) PAT5="$pval" ;;
-    5.exclude) PAT5X="$pval" ;;
-    6.pattern) PAT6="$pval" ;;
+    1.pattern) [ -z "$PAT1" ] || pattern_bad "重复条目 $pkey"; PAT1="$pval" ;;
+    2.pattern) [ -z "$PAT2" ] || pattern_bad "重复条目 $pkey"; PAT2="$pval" ;;
+    3.pattern) [ -z "$PAT3" ] || pattern_bad "重复条目 $pkey"; PAT3="$pval" ;;
+    4.pattern) [ -z "$PAT4" ] || pattern_bad "重复条目 $pkey"; PAT4="$pval" ;;
+    5.pattern) [ -z "$PAT5" ] || pattern_bad "重复条目 $pkey"; PAT5="$pval" ;;
+    5.exclude) [ -z "$PAT5X" ] || pattern_bad "重复条目 $pkey"; PAT5X="$pval" ;;
+    6.pattern) [ -z "$PAT6" ] || pattern_bad "重复条目 $pkey"; PAT6="$pval" ;;
     *) echo "GATE FAIL: 模式集含未知条目 $pkey —— fail-closed 停发"; exit 1 ;;
   esac
 done < "$PATTERN_SRC"
 if [ -z "$PAT1" ] || [ -z "$PAT2" ] || [ -z "$PAT3" ] || [ -z "$PAT4" ] || [ -z "$PAT5" ] || [ -z "$PAT5X" ] || [ -z "$PAT6" ]; then
   echo "GATE FAIL: 模式集不完整（六规则模式与规则 5 排除清单须齐全）—— fail-closed 停发"; exit 1
+fi
+if [ -n "${GATE_FP_KEY:-}" ] && ! command -v python3 >/dev/null 2>&1; then
+  echo "GATE FAIL: 设了 GATE_FP_KEY（HMAC 指纹）但缺少 python3 —— fail-closed 停发"; exit 1
 fi
 
 # 扫描文件数：只计普通文件（grep -r 不跟随扫描树内符号链接，计数口径与实际扫描一致）。
@@ -195,16 +239,32 @@ fi
 say_fail() { echo "GATE FAIL: $1"; FAIL=1; }
 say_warn() { echo "GATE WARN: $1"; WARN=1; }
 scan_error() { echo "GATE FAIL: $1 扫描过程出错（grep 退出码 $2）—— fail-closed 停发"; FAIL=1; printf '%s\terror\t\t\n' "$1" >> "$FINDINGS"; }
+# tsv_esc <字符串>：把反斜杠/换行/制表符转义后输出，保证运行记录的 TSV 行不被文件名破坏。
+tsv_esc() {
+  local v="$1"
+  v="${v//\\/\\\\}"; v="${v//$'\n'/\\n}"; v="${v//$'\t'/\\t}"
+  printf '%s' "$v"
+}
+# 命中记录格式（collect 用 grep -Z 产生）：<路径> NUL <行号>:<内容> LF。路径以 NUL 为界、
+# 行号取其后第一个冒号之前，内容里的 "ref:2:" 或路径里的 ":7:" 都不会造成错位。
+# fp_hex：stdin -> 十六进制指纹。缺省 SHA-256；设 GATE_FP_KEY 时为 HMAC-SHA256。
+# 输出指纹与 allowlist fp: 条目必须都经由本函数。
+fp_hex() {
+  if [ -n "${GATE_FP_KEY:-}" ]; then
+    python3 -I -c 'import hashlib, hmac, os, sys; print(hmac.new(os.environ["GATE_FP_KEY"].encode("utf-8", "surrogateescape"), sys.stdin.buffer.read(), hashlib.sha256).hexdigest())'
+  else
+    sha256sum | cut -d' ' -f1
+  fi
+}
 # record_hits <规则> <级别>：把 KEPT 中全部命中的位置（不含内容）记入 FINDINGS。
 record_hits() {
-  local line
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^(.*):([0-9]+):(.*)$ ]]; then
-      printf '%s\t%s\t%s\t%s\n' "$1" "$2" "${BASH_REMATCH[1]#"$DIR"/}" "${BASH_REMATCH[2]}" >> "$FINDINGS"
-    fi
+  local path rest rel
+  while IFS= read -r -d '' path || [ -n "$path" ]; do
+    IFS= read -r rest || true
+    rel="${path#"$DIR"/}"
+    printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$(tsv_esc "$rel")" "${rest%%:*}" >> "$FINDINGS"
   done < "$KEPT"
 }
-
 # 0. 二进制文件：grep -I 会静默跳过，等于没扫。非空且无法按文本读取的文件一律 FAIL，
 #    除非 allowlist 有与当前文件内容绑定的 bin:<相对路径>:<sha256> 条目。
 #    （不可读文件由下方各规则的 grep 退出码 >=2 判 FAIL。）
@@ -216,7 +276,7 @@ while IFS= read -r -d '' f; do
     sum="$(sha256sum "$f" | cut -d' ' -f1)"
     if ! grep -qxF "bin:$rel:$sum" "$EFF"; then
       echo "$rel: [二进制，无法按文本扫描 sha256=$sum]" >> "$WORK_TMP/binary"
-      printf 'binary\tfail\t%s\t\n' "$rel" >> "$FINDINGS"
+      printf 'binary\tfail\t%s\t\n' "$(tsv_esc "$rel")" >> "$FINDINGS"
     fi
   fi
 done < "$WORK_TMP/files"
@@ -228,77 +288,83 @@ fi
 if [ -s "$WORK_TMP/links" ]; then
   say_fail "存在符号链接（不会被扫描；请替换为实体文件后重跑）："
   head -5 "$WORK_TMP/links" | while IFS= read -r l; do echo "${l#"$DIR"/}"; done
-  while IFS= read -r l; do printf 'symlink\tfail\t%s\t\n' "${l#"$DIR"/}" >> "$FINDINGS"; done < "$WORK_TMP/links"
+  while IFS= read -r l; do printf 'symlink\tfail\t%s\t\n' "$(tsv_esc "${l#"$DIR"/}")" >> "$FINDINGS"; done < "$WORK_TMP/links"
 fi
 if [ -s "$WORK_TMP/binary" ]; then
   say_fail "存在无法按文本扫描的文件（人工复核后以 bin:<相对路径>:<sha256> 登记 allowlist）："
   head -5 "$WORK_TMP/binary"
 fi
 
-# collect: 运行一次 grep，结果落 RAW；GRC 保存退出码（0=有命中 1=无命中 >=2=出错）。
+# collect: 运行一次 grep（-Z：路径后接 NUL，见 record_hits 注释），结果落 RAW；
+# GRC 保存退出码（0=有命中 1=无命中 >=2=出错）。
 collect() {
-  grep "$@" > "$RAW"
+  grep -Z "$@" > "$RAW"
   GRC=$?
   return 0
 }
-# refilter: 以 grep -v 类过滤器对 RAW 再过滤（规则自带的内容排除，判定口径不变）。
+# refilter: 以 grep -v 类过滤器对 RAW 再过滤（规则自带的内容排除，判定口径不变；-a：RAW 含 NUL）。
 refilter() {
-  grep "$@" "$RAW" > "$RAW2"
+  grep -a "$@" "$RAW" > "$RAW2"
   GRC=$?
   if [ "$GRC" -ge 2 ]; then return 1; fi
   mv "$RAW2" "$RAW"
   return 0
 }
 # is_exempt <相对路径> <行号> <内容>：与生效条目精确比对（字面条目或 fp: 指纹条目）。
+# fp: 条目与输出指纹同走 fp_hex（设了 GATE_FP_KEY 即 HMAC）；指纹最多算一次。
 is_exempt() {
-  local rel="$1" lineno="$2" content="$3" entry fp
+  local rel="$1" lineno="$2" content="$3" entry fp=""
   while IFS= read -r entry; do
     [ -z "$entry" ] && continue
     if [ "$entry" = "$rel:$lineno:$content" ]; then return 0; fi
     case "$entry" in
       fp:*)
-        fp="$(printf '%s' "$rel:$lineno:$content" | sha256sum | cut -d' ' -f1)"
-        if [ "$entry" = "fp:$fp" ]; then return 0; fi
+        [ -n "$fp" ] || fp="$(printf '%s' "$rel:$lineno:$content" | fp_hex)"
+        if [ -n "$fp" ] && [ "$entry" = "fp:$fp" ]; then return 0; fi
         ;;
     esac
   done < "$EFF"
   return 1
 }
-# apply_allowlist: RAW -> KEPT，仅剔除被精确条目豁免的命中。
+# apply_allowlist: RAW -> KEPT，仅剔除被精确条目豁免的命中。无法解析的记录一律保留（fail-closed）。
 apply_allowlist() {
   : > "$KEPT"
-  local line path lineno content rel
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^(.*):([0-9]+):(.*)$ ]]; then
-      path="${BASH_REMATCH[1]}"; lineno="${BASH_REMATCH[2]}"; content="${BASH_REMATCH[3]}"
-      rel="${path#"$DIR"/}"
-      if is_exempt "$rel" "$lineno" "$content"; then continue; fi
-    fi
-    echo "$line" >> "$KEPT"
+  local path rest lineno content rel
+  while IFS= read -r -d '' path || [ -n "$path" ]; do
+    IFS= read -r rest || true
+    lineno="${rest%%:*}"; content="${rest#*:}"
+    rel="${path#"$DIR"/}"
+    if [[ "$lineno" =~ ^[0-9]+$ ]] && is_exempt "$rel" "$lineno" "$content"; then continue; fi
+    printf '%s\0%s\n' "$path" "$rest" >> "$KEPT"
   done < "$RAW"
 }
 # print_hits <模式 redact|assign|email>：打印 KEPT 前 5 条，默认脱敏。
 print_hits() {
-  local mode="$1" line path lineno content len fp8 n=0
-  while IFS= read -r line && [ "$n" -lt 5 ]; do
+  local mode="$1" path rest lineno content len fp fline n=0
+  while [ "$n" -lt 5 ] && { IFS= read -r -d '' path || [ -n "$path" ]; }; do
+    IFS= read -r rest || true
     n=$((n + 1))
-    if [ "${GATE_SHOW_CONTENT:-0}" = "1" ]; then echo "$line"; continue; fi
-    if [[ "$line" =~ ^(.*):([0-9]+):(.*)$ ]]; then
-      path="${BASH_REMATCH[1]}"; lineno="${BASH_REMATCH[2]}"; content="${BASH_REMATCH[3]}"
-    else
-      echo "$line"; continue
-    fi
+    if [ "${GATE_SHOW_CONTENT:-0}" = "1" ]; then printf '%s:%s\n' "$path" "$rest"; continue; fi
+    lineno="${rest%%:*}"; content="${rest#*:}"
     case "$mode" in
       assign)
         printf '%s:%s:%s\n' "$path" "$lineno" "$(printf '%s' "$content" | sed -E -e 's#(://[^:/@ ]+:)[^@ ]+@#\1****@#g' -e "s/((password|passwd|pwd)[[:space:]]*[:=][[:space:]]*[\"']?)[^\"' ]+/\\1****/i")"
         ;;
       email)
-        printf '%s:%s:%s\n' "$path" "$lineno" "$(printf '%s' "$content" | sed -E 's/([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/\1****\2/g')"
+        # 规则 6 用 grep -o，content 只是邮箱匹配本身，看不到前面的 scheme://用户:。凭据字符不得外泄：
+        # 只要该行含 URL userinfo 口令（://用户:口令@），本行全部邮箱匹配整段掩码（不保留首字符；
+        # 口令含邮箱字符集之外的字符时匹配可能从口令中段起，保留首字符同样泄露）。真实邮箱照旧保留首字符。
+        fline="$(sed -n "${lineno}p" < "$path" 2>/dev/null)"
+        if [[ "$fline" =~ ://[^[:space:]/@]*:[^[:space:]/@]*@ ]]; then
+          printf '%s:%s:%s\n' "$path" "$lineno" "$(printf '%s' "$content" | sed -E 's/[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/****\1/g')"
+        else
+          printf '%s:%s:%s\n' "$path" "$lineno" "$(printf '%s' "$content" | sed -E 's/([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/\1****\2/g')"
+        fi
         ;;
       *)
         len="$(printf '%s' "$content" | wc -c)"
-        fp8="$(printf '%s' "$content" | sha256sum | cut -c1-8)"
-        printf '%s:%s: [内容已脱敏 len=%s fp=%s]\n' "$path" "$lineno" "$len" "$fp8"
+        fp="$(printf '%s' "$content" | fp_hex)"
+        printf '%s:%s: [内容已脱敏 len=%s fp=%s]\n' "$path" "$lineno" "$len" "$fp"
         ;;
     esac
   done < "$KEPT"
@@ -392,5 +458,5 @@ if [ -z "${GATE_PATTERN_FILE:-}" ] && [ "${GATE_ALLOW_SKELETON:-0}" != "1" ]; th
   echo "  发布运行须设 GATE_PATTERN_FILE + 指纹；仅本地调试/测试可设 GATE_ALLOW_SKELETON=1。"
   exit 3
 fi
-if [ "$WARN" -eq 1 ]; then echo "结果：WARN —— 可发布，但请 GC 复核上述项"; exit 0; fi
+if [ "$WARN" -eq 1 ]; then echo "结果：WARN —— 须人工复核上述项后方可发布（exit 4，与 PASS 的 exit 0 不同）"; exit 4; fi
 echo "结果：PASS"

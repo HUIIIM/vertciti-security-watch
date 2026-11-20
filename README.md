@@ -19,13 +19,16 @@ vertciti.com 生产发布前运行的三道发布门禁脚本（敏感信息扫�
 
 vertciti.com 每次生产发布前要过三道门禁，全部脚本化：敏感信息扫描、首页返回 200、390px 视口下的触控目标尺寸。
 三道门禁是发布流水线的硬门，不是建议：脚本 FAIL 时 exit 1，发布必须停下，没有"这次先过"的开关。
+
+门禁 1 退出码契约（流水线须分别处理，不得把 0 与 4 混同）：`0`=PASS（无命中，全量模式集）· `1`=FAIL · `2`=用法错误 · `3`=NON-BINDING（骨架运行、无 FAIL，不是放行）· `4`=WARN（仅 WARN 级命中，须人工复核后方可发布；此前与 PASS 同为 0）。优先级 1 > 3 > 4 > 0。`GATE_ALLOW_SKELETON=1` 的本地/测试运行：无命中 0、仅 WARN 4。
+Gate 1 exit codes: 0 PASS, 1 FAIL, 2 usage error, 3 NON-BINDING (skeleton run), 4 WARN-only (manual review required; previously indistinguishable from PASS).
 误报在 allowlist 里登记，而不是放宽扫描器。产品一页纸见 [docs/PRODUCT.md](docs/PRODUCT.md)。
 
 ## 能力一览
 
 | # | 门禁 / 工具 | 脚本 | 判定 |
 |---|---|---|---|
-| 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | 扫描目录内全部文件（不限 .txt）。FAIL：私钥 / `ghp_` 等 token / 规则 2 停发字样 / 规则 1 封存日期及其各种写法 / 无法按文本扫描的文件（二进制、不可读）/ 目录为空。WARN（人工复核）：口令赋值、邮箱地址。命中默认脱敏输出（`路径:行号` + 掩码/指纹），不回显明文。设 `GATE_JSON_OUT=<路径>` 另写机器可读运行记录（JSON：结果、模式集/allowlist/脚本 sha256、被扫文件清单指纹、命中位置，不含命中内容） |
+| 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | 扫描目录内全部文件（不限 .txt）。FAIL：私钥 / `ghp_`、`sk-proj-`、`glpat-`、`npm_`、JWT、`aws_secret_access_key=`、Stripe `sk_test_`/`sk_live_`、Twilio `SK…`、SendGrid `SG.…`、Slack webhook URL、数据库连接串内联口令（`postgres://用户:口令@…`）等 token / 规则 2 停发字样 / 规则 1 封存日期及其各种写法 / 无法按文本扫描的文件（二进制、不可读）/ 目录为空。WARN（人工复核，exit 4）：口令赋值、邮箱地址。命中默认脱敏输出（`路径:行号` + 掩码/指纹），不回显明文；URL/连接串里的口令整段掩码，不保留首字符；指纹为完整 SHA-256，设 `GATE_FP_KEY` 则改用 HMAC-SHA256（无密钥时低熵内容的指纹可被持日志者离线猜测，allowlist 的 `fp:` 条目随之改用同一函数，换密钥须重新登记）。模式集装载严格校验：缺正文/空值/重复/未知条目、六规则与规则 5 排除清单不全即 exit 1。设 `GATE_JSON_OUT=<路径>` 另写机器可读运行记录（JSON：`run_id`、`gate_version`、结果、模式集/allowlist/脚本 sha256、被扫文件清单指纹、命中位置，不含命中内容） |
 | 2 | 首页可访问 | `qa-gates/homepage-200-check.sh [URL]` | 站点自身返回的状态码非 200（含重定向、4xx/5xx、连接失败、超时）即 FAIL |
 | 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕。页面返回非 2xx、出现 JS 报错或某条路由量不到任何可交互元素时也 FAIL；所有路由渲染出相同布局时 FAIL（路由表与站点不符，实际只测了一页），真实路由可经 `TOUCH_TARGET_ROUTES` 指定；环境变量未设时读脚本同目录的 `touch-target-routes.txt`（发布管线定版表，2026-10-27 按线上 sitemap 与首页链接面核定为 `/ /business/ /data-room/ /company/ /accessibility/ /contact/`），运行日志以 `[routes] source=` 标明实际生效来源 |
 | — | 颜色审计 | `security-watch/color-audit.py` | 只读：提取首页内联 CSS 与 `style=` 中的全部色值并统计 |
@@ -37,7 +40,7 @@ vertciti.com 每次生产发布前要过三道门禁，全部脚本化：敏感�
 ```bash
 cd vertciti-security-watch
 bash security-watch/data-room-gate.sh --help        # 看门禁 1 的 FAIL/WARN 规则
-bash security-watch/data-room-gate.sh ./data-room   # 骨架运行：无 FAIL 时 exit 3（NON-BINDING），不是放行
+bash security-watch/data-room-gate.sh ./data-room   # 骨架运行：无 FAIL 时 exit 3（NON-BINDING），不是放行；全量集下仅 WARN 为 exit 4
 # 发布运行：GATE_PATTERN_FILE=<部署侧全量模式集> GATE_PATTERN_SHA256=<登记指纹> bash security-watch/data-room-gate.sh ./data-room
 ```
 
