@@ -10,6 +10,14 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- 门禁 1 批次 1（#6 评分卡 §3.1 F/L/K/I/J、§3.3、§3.4）/ gate 1 batch 1:
+  - **退出码契约变更**：仅 WARN 级命中改为 exit 4（此前与 PASS 同为 0、不可区分）；0=PASS、1=FAIL、2=用法错误、3=NON-BINDING 不变；优先级 1 > 3 > 4 > 0；运行记录 `result: WARN` 对应 `exit_code: 4`。依赖"退出码 0 即放行"的流水线须同步处理 4（人工复核后放行）/ **exit-code contract change**: WARN-only runs now exit 4.
+  - 规则 4 补 OpenAI `sk-proj-`、GitLab `glpat-`、`npm_`、JWT、`aws_secret_access_key=`、Stripe/restricted `*_test_`、Twilio `SK…`、SendGrid `SG.…`、Slack webhook URL、数据库连接串内联口令；骨架头注明规则 3–6 与全量集同文，缺口同样存在于生产集，部署侧须同步（§3.1-F）/ rule 4 covers 9 more token types.
+  - 掩码不再泄露口令首字符：URL/连接串 userinfo 口令整段掩码，真实邮箱仍保留首字符（§3.1-L）/ masking never preserves a credential character.
+  - 运行记录路径/行号改用 `grep -Z` 解析，行内容形如 `ref:2:…` 不再错位（§3.1-K）/ run-record path and line parsing is unambiguous.
+  - 模式集严格校验：缺模式正文、空值、重复、未知条目、六规则与规则 5 排除清单不全一律 exit 1，骨架与全量集同一检查（§3.1-I）/ pattern set loading is strict and fail-closed.
+  - 运行记录新增 `run_id`（UUIDv4）与 `gate_version`（§3.4）/ run record gains run_id and gate_version.
+  - 命中指纹改为完整 SHA-256，设 `GATE_FP_KEY` 时为 HMAC-SHA256；allowlist `fp:` 条目同走该函数，设密钥后旧的无密钥条目失效须重新登记；残余风险（无密钥时低熵内容可被离线猜测）见脚本头与 README（§3.1-J）/ fingerprints are full-length, optionally keyed.
 - 门禁 3：Chromium 沙箱默认开启（此前恒以 `--no-sandbox` 渲染被测页面并执行其 JS；且 Playwright 默认 `chromium_sandbox=False` 会自行关沙箱，现显式传 True）。仅在以 root 运行（Chromium 拒绝 root 下沙箱）或设 `TOUCH_TARGET_NO_SANDBOX=1` 时关闭，运行日志 `[sandbox]` 行注明（#6 SEC-A3、#26）/ gate 3 runs Chromium sandboxed by default.
 - 门禁 3：`touch-target-routes.txt`（站点真实路径）只用于 http(s) 目标。此前它也作用于 `file://` 目标（README 的无参数模式：测生产 `index.html`），`/business/` 被解析成 `file:///business/`（文件系统根目录），该模式先"测"了根目录列表再崩溃退出；现 `file://` 目标沿用内置 hash 路由，若经环境变量强行给 `file://` 指定路径路由则明确 FAIL / gate 3 applies the routes file to http(s) targets only.
 - 门禁 1 机器可读运行记录：设 `GATE_JSON_OUT=<路径>` 时，每次运行（含中途 fail-closed 退出）结束都写 JSON——结果与退出码、模式集形态与 sha256、allowlist 与脚本 sha256、被扫文件清单指纹（相对路径 + 文件 sha256）、每条命中的规则/级别/相对路径/行号，**不含命中内容**；要求了记录却写不出即 exit 1（#6 OPS-2、§4c-1）/ gate 1 writes an optional machine-readable run record (locations only, never content).
