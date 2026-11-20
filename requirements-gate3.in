@@ -1,0 +1,6 @@
+# Gate 3 browser tests in CI: the dev tools plus the playwright Python driver.
+# The browser itself is the runner's preinstalled Chrome (TOUCH_TARGET_CHROME).
+# Regenerate requirements-gate3.txt with:
+#   pip-compile --generate-hashes --allow-unsafe requirements-gate3.in
+-r requirements-dev.in
+playwright==1.64.1
