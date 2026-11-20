@@ -10,7 +10,10 @@ permissions:
   contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded runs on PR branches only. On main a newer merge used to
+  # cancel the previous merge's run, leaving main commits whose checks never
+  # finished (43deff6, 365cc97); every main commit must run to completion.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   python:
     name: Python syntax check (py_compile)

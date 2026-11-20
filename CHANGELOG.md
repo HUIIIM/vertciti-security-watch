@@ -10,6 +10,7 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- CI 并发取消只作用于 PR：此前 `cancel-in-progress: true` 也作用于 push 到 main，新合并会取消上一合并提交的 CI，main 上出现从未跑完检查的提交（`43deff6`、`365cc97`，#6 §3.8）/ CI on main is never cancelled.
 - CI 新增 `Gate 3 browser tests (Chrome)` job：用 runner 预装 Chrome 实跑 `tests/test_gate3_browser.py`（此前在 CI 中全部 skip），playwright 驱动经 `requirements-gate3.txt` 哈希锁定安装；`GATE3_BROWSER_REQUIRED=1` 使缺浏览器即失败而非 skip；放开 Ubuntu 24.04 的 AppArmor 用户命名空间限制以保留 Chrome 沙箱（#26）/ CI runs the gate 3 browser tests.
 - 门禁 3：Chromium 沙箱默认开启（此前恒以 `--no-sandbox` 渲染被测页面并执行其 JS；且 Playwright 默认 `chromium_sandbox=False` 会自行关沙箱，现显式传 True）。仅在以 root 运行（Chromium 拒绝 root 下沙箱）或设 `TOUCH_TARGET_NO_SANDBOX=1` 时关闭，运行日志 `[sandbox]` 行注明（#6 SEC-A3、#26）/ gate 3 runs Chromium sandboxed by default.
 - 门禁 3：`touch-target-routes.txt`（站点真实路径）只用于 http(s) 目标。此前它也作用于 `file://` 目标（README 的无参数模式：测生产 `index.html`），`/business/` 被解析成 `file:///business/`（文件系统根目录），该模式先"测"了根目录列表再崩溃退出；现 `file://` 目标沿用内置 hash 路由，若经环境变量强行给 `file://` 指定路径路由则明确 FAIL / gate 3 applies the routes file to http(s) targets only.
