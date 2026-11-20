@@ -696,3 +696,34 @@ def test_shadow_expect_match_and_mismatch(tmp_path: Path) -> None:
     res = _shadow(tmp_path, "--expect", "71")
     assert res.returncode == 1 and "2 != expected 71" in res.stderr
     assert _shadow(tmp_path, "--expect", "x").returncode == 2
+
+
+# ---- pattern-set structure is fail-closed (provenance gate, #6 §3.1-I) ----
+
+def _corrupt_full_set(tmp_path: Path, mutate) -> tuple[Path, str]:
+    pf, _ = _full_pattern_set(tmp_path)
+    lines = pf.read_text(encoding="utf-8").splitlines()
+    pf.write_text("\n".join(mutate(lines)) + "\n", encoding="utf-8")
+    # re-fingerprint: the corrupted set is "registered", so only the structural
+    # check can stop it
+    return pf, hashlib.sha256(pf.read_bytes()).hexdigest()
+
+
+@needs_bash
+@pytest.mark.parametrize("name,mutate,message", [
+    # a key with no pattern used to become the literal regex "1.pattern"
+    ("bare_key", lambda ls: ["1.pattern" if ln.startswith("1.pattern ") else ln for ln in ls],
+     "缺少模式"),
+    ("blank_value", lambda ls: ["1.pattern    " if ln.startswith("1.pattern ") else ln for ln in ls],
+     "模式为空"),
+    # a repeated key used to silently override the earlier one
+    ("duplicate", lambda ls: ls + ["4.pattern zzz-never-matches"], "重复"),
+])
+def test_gate_malformed_full_pattern_set_fails_closed(tmp_path: Path, name: str,
+                                                      mutate, message: str) -> None:
+    pf, fp = _corrupt_full_set(tmp_path, mutate)
+    env = {"GATE_PATTERN_FILE": str(pf), "GATE_PATTERN_SHA256": fp}
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN}), env=env)
+    assert res.returncode == 1, res.stdout
+    assert message in res.stdout and "fail-closed" in res.stdout
+    assert "结果：PASS" not in res.stdout

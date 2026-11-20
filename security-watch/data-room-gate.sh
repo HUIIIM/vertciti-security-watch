@@ -165,9 +165,23 @@ else
   echo "模式集：仓内骨架（合成模式）—— 非约束性运行，判定不作发布依据"
 fi
 PAT1=""; PAT2=""; PAT3=""; PAT4=""; PAT5=""; PAT5X=""; PAT6=""
+SEEN_KEYS=" "
 while IFS= read -r pline || [ -n "$pline" ]; do
   case "$pline" in ''|'#'*) continue ;; esac
+  # 结构校验 fail-closed：条目必须是 "<键> <非空模式>"。缺分隔空格时 pkey 与 pval
+  # 都会是整行，规则被静默替换成字面串、完整性检查照样通过（假过）；重复键会让
+  # 后一条静默覆盖前一条。两者都按损坏的模式集停发，不作约束判定。
+  if [[ "$pline" != *" "* ]]; then
+    echo "GATE FAIL: 模式集条目缺少模式（\"<键> <模式>\" 格式）：${pline%%[[:space:]]*} —— fail-closed 停发"; exit 1
+  fi
   pkey="${pline%% *}"; pval="${pline#* }"
+  if [ -z "${pval//[[:space:]]/}" ]; then
+    echo "GATE FAIL: 模式集条目 $pkey 的模式为空 —— fail-closed 停发"; exit 1
+  fi
+  case "$SEEN_KEYS" in *" $pkey "*)
+    echo "GATE FAIL: 模式集条目 $pkey 重复 —— fail-closed 停发"; exit 1 ;;
+  esac
+  SEEN_KEYS="$SEEN_KEYS$pkey "
   case "$pkey" in
     1.pattern) PAT1="$pval" ;;
     2.pattern) PAT2="$pval" ;;
