@@ -10,6 +10,7 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- 门禁 1 模式集结构校验 fail-closed：条目缺少模式（如只有 `1.pattern`）、模式为空、或键重复，一律停发。此前缺分隔空格的条目会让规则被静默替换成字面串 `1.pattern` 并照样通过完整性检查，重复键则静默覆盖前一条（#6 §3.1-I）/ malformed or duplicate pattern-set entries now fail closed.
 - 门禁 3：Chromium 沙箱默认开启（此前恒以 `--no-sandbox` 渲染被测页面并执行其 JS；且 Playwright 默认 `chromium_sandbox=False` 会自行关沙箱，现显式传 True）。仅在以 root 运行（Chromium 拒绝 root 下沙箱）或设 `TOUCH_TARGET_NO_SANDBOX=1` 时关闭，运行日志 `[sandbox]` 行注明（#6 SEC-A3、#26）/ gate 3 runs Chromium sandboxed by default.
 - 门禁 3：`touch-target-routes.txt`（站点真实路径）只用于 http(s) 目标。此前它也作用于 `file://` 目标（README 的无参数模式：测生产 `index.html`），`/business/` 被解析成 `file:///business/`（文件系统根目录），该模式先"测"了根目录列表再崩溃退出；现 `file://` 目标沿用内置 hash 路由，若经环境变量强行给 `file://` 指定路径路由则明确 FAIL / gate 3 applies the routes file to http(s) targets only.
 - 门禁 1 机器可读运行记录：设 `GATE_JSON_OUT=<路径>` 时，每次运行（含中途 fail-closed 退出）结束都写 JSON——结果与退出码、模式集形态与 sha256、allowlist 与脚本 sha256、被扫文件清单指纹（相对路径 + 文件 sha256）、每条命中的规则/级别/相对路径/行号，**不含命中内容**；要求了记录却写不出即 exit 1（#6 OPS-2、§4c-1）/ gate 1 writes an optional machine-readable run record (locations only, never content).
