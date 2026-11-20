@@ -67,6 +67,10 @@
 #     残余风险：无 GATE_FP_KEY 时指纹仍是未加盐哈希，持日志者可对低熵行内容离线验证猜测
 #     （全长只是不再可碰撞缩短，并不能阻止猜测）；密钥经进程环境传递，泄露即失效。
 #     对低熵内容（日期、短口令）的日志留存环境应设置 GATE_FP_KEY 并将密钥与日志分开存放。
+#   - [过渡标注，中枢 2026-11-20 裁定] 打印 fp 与 allowlist fp: 的哈希输入不同：打印 fp 哈希
+#     「行内容」，allowlist fp: 哈希「相对路径:行号:内容」——两面语义不同、不可互比、不可互抄
+#     （把打印 fp 抄进 allowlist 不会命中）。统一至「相对路径:行号:内容」并入批 2 与 ARCH-3
+#     指纹重注册同批落码，落码后本标注删除。
 # 用法：bash data-room-gate.sh [data-room目录]
 GATE_VERSION="1.1.0"
 set -u
@@ -84,6 +88,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "  GATE_JSON_OUT=<路径>：结束时写机器可读运行记录（JSON，只含命中位置，不含内容）；写不出即 exit 1。"
   echo "  退出码: exit 0=PASS  exit 1=FAIL  exit 2=用法错误  exit 3=NON-BINDING(骨架)  exit 4=WARN(仅 WARN 级命中，须人工复核)"
   echo "  GATE_FP_KEY=<密钥>：命中指纹与 allowlist fp: 条目改用 HMAC-SHA256（缺省为未加盐 SHA-256，低熵内容可被离线猜测）。"
+  echo "  注意（过渡标注）：打印 fp 哈希「行内容」、allowlist fp: 哈希「相对路径:行号:内容」，两面不可互比、不可互抄；统一口径将于批 2 落码。"
   echo "  命中输出默认脱敏；GATE_SHOW_CONTENT=1 输出原文（仅限本机人工复核，禁止在 CI 开启）。"
   exit 0
 fi

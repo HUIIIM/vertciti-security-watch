@@ -10,6 +10,7 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- 门禁 1 指纹语义过渡标注（中枢 2026-11-20 裁定）：打印 fp 哈希「行内容」、allowlist `fp:` 条目哈希「相对路径:行号:内容」，两面语义不同、不可互比、不可互抄——脚本头注与 `--help` 输出已显名标注；统一至「相对路径:行号:内容」并入批 2 与 ARCH-3 指纹重注册同批落码 / gate 1 fingerprint inputs are labelled as non-interchangeable pending unification in batch 2.
 - 门禁 1 批次 1（#6 评分卡 §3.1 F/L/K/I/J、§3.3、§3.4）/ gate 1 batch 1:
   - **退出码契约变更**：仅 WARN 级命中改为 exit 4（此前与 PASS 同为 0、不可区分）；0=PASS、1=FAIL、2=用法错误、3=NON-BINDING 不变；优先级 1 > 3 > 4 > 0；运行记录 `result: WARN` 对应 `exit_code: 4`。依赖"退出码 0 即放行"的流水线须同步处理 4（人工复核后放行）/ **exit-code contract change**: WARN-only runs now exit 4.
   - 规则 4 补 OpenAI `sk-proj-`、GitLab `glpat-`、`npm_`、JWT、`aws_secret_access_key=`、Stripe/restricted `*_test_`、Twilio `SK…`、SendGrid `SG.…`、Slack webhook URL、数据库连接串内联口令；骨架头注明规则 3–6 与全量集同文，缺口同样存在于生产集，部署侧须同步（§3.1-F）/ rule 4 covers 9 more token types.
