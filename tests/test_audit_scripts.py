@@ -88,6 +88,7 @@ def _run_gate(
     data_dir: Path,
     allowlist: str | None = "",
     env: dict[str, str] | None = None,
+    skeleton_text: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a copy of the gate whose sibling allowlist holds `allowlist`.
 
@@ -101,6 +102,8 @@ def _run_gate(
     script = gate_dir / "data-room-gate.sh"
     shutil.copy(SW / "data-room-gate.sh", script)
     shutil.copy(SW / "gate-patterns-skeleton.txt", gate_dir / "gate-patterns-skeleton.txt")
+    if skeleton_text is not None:
+        (gate_dir / "gate-patterns-skeleton.txt").write_text(skeleton_text, encoding="utf-8")
     al = gate_dir / "gate-allowlist.txt"
     al.write_text(allowlist or "", encoding="utf-8")
     if allowlist is None:
@@ -443,7 +446,7 @@ def test_gate_exact_allowlist_entry_suppresses_only_its_instance(
 def test_gate_redacts_password_value(tmp_path: Path) -> None:
     secret = "Sup3rSecretValue"
     res = _run_gate_copy(tmp_path, "", {"a.txt": "db password = " + secret + "\n"})
-    assert res.returncode == 0, res.stdout
+    assert res.returncode == 4, res.stdout  # WARN-only exits 4, distinct from PASS
     assert "GATE WARN" in res.stdout
     assert secret not in res.stdout
     assert secret not in res.stderr
@@ -696,3 +699,231 @@ def test_shadow_expect_match_and_mismatch(tmp_path: Path) -> None:
     res = _shadow(tmp_path, "--expect", "71")
     assert res.returncode == 1 and "2 != expected 71" in res.stderr
     assert _shadow(tmp_path, "--expect", "x").returncode == 2
+
+
+# ---- gate 1 batch 1 (scorecard #6 §3.1 F/L/K/I/J, §3.3, §3.4) ----
+
+def _synthetic_tokens() -> dict[str, str]:
+    """Clearly synthetic token-shaped values, assembled at runtime."""
+    return {
+        "openai": "sk-proj-" + "SYNTHETIC" * 3,
+        "gitlab": "glpat-" + "SYNTHETIC0123456789ab",
+        "npm": "npm_" + "SYNTHETICSYNTHETICSYNTHETICSYNTHETIC",
+        "jwt": "eyJ" + "SYNTHETICHDR" + ".eyJ" + "SYNTHETICBODY" + ".SYNTHETICSIGNATURE",
+        "aws_secret": "aws_secret_access_key = " + "SYNTHETIC/" * 4,
+        "stripe_test": "sk_test_" + "SYNTHETIC0123",
+        "twilio": "SK" + "0123456789abcdef" * 2,
+        "sendgrid": "SG." + "SYNTHETICSYNTHETIC" + "." + "SYNTHETICSYNTHETIC",
+        "slack_hook": "https://hooks.slack.com/services/T0SYNTH01/B0SYNTH01/" + "SYNTHETIC" * 3,
+        "pg_url": "postgres://svcuser:SynthPass9@db.example.com/app",
+    }
+
+
+@needs_bash
+@pytest.mark.parametrize("kind", sorted(_synthetic_tokens()))
+def test_gate_rule4_covers_token_type(tmp_path: Path, kind: str) -> None:
+    line = "value: " + _synthetic_tokens()[kind]
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": "ok\n" + line + "\n"}))
+    assert res.returncode == 1, (kind, res.stdout)
+    assert "疑似密钥 token" in res.stdout, (kind, res.stdout)
+
+
+@needs_bash
+def test_gate_rule4_combined_fixture_all_types_are_findings(tmp_path: Path) -> None:
+    toks = _synthetic_tokens()
+    body = "\n".join("line %d %s" % (i, v) for i, v in enumerate(toks.values()))
+    res, rec = _record(tmp_path, _data(tmp_path, {"a.txt": body + "\n"}))
+    assert res.returncode == 1, res.stdout
+    rule4_lines = {f["line"] for f in rec["findings"] if f["rule"] == "rule4"}
+    assert rule4_lines == set(range(1, len(toks) + 1))
+
+
+@needs_bash
+@pytest.mark.parametrize("line", [
+    "see sk-learn and sk-proj for docs",
+    "SKU 12345 and SK1234",
+    "the SG. prefix is a sendgrid thing",
+    "npm_config_cache is an env var",
+    "eyJ is how base64 json starts",
+    "set aws_secret_access_key in your environment",
+    "connect via postgres://db.example.com/app",
+    "see https://hooks.slack.com/ for webhook docs",
+    "sk_test mode",
+    "glpat tokens are created in settings",
+])
+def test_gate_rule4_no_false_positive_on_prose(tmp_path: Path, line: str) -> None:
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN + line + "\n"}))
+    assert res.returncode == 0, res.stdout
+
+
+@needs_bash
+@pytest.mark.parametrize("url", [
+    "postgres://admin:Zebra9Pass@db.example.com/app",
+    "https://admin:Zebra9Pass@api.example.com/x",   # not a rule-4 scheme: rule 6 path only
+    "https://admin:p!ss9Zebra@api.example.com/x",   # password char outside the email charset
+])
+def test_gate_mask_never_leaks_credential_chars(tmp_path: Path, url: str) -> None:
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": "dsn " + url + "\n"}))
+    out = res.stdout
+    assert "Z****" not in out and "Zebra9" not in out and "p!ss9" not in out
+    assert "s9Zebra" not in out and "9Zebra@" not in out and "s****@" not in out
+    assert "a.txt:1:" in out
+
+
+@needs_bash
+def test_gate_genuine_email_mask_keeps_first_char(tmp_path: Path) -> None:
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": "contact jane.doe@example.com\n"}))
+    assert "j****@example.com" in res.stdout
+    assert "jane.doe" not in res.stdout
+
+
+@needs_bash
+def test_gate_warn_only_exits_4_and_pass_stays_0(tmp_path: Path) -> None:
+    res, rec = _record(tmp_path, _data(tmp_path, {"a.txt": "db password = Sup3rSecretValue\n"}))
+    assert res.returncode == 4, res.stdout
+    assert rec["result"] == "WARN" and rec["exit_code"] == 4
+    clean = tmp_path / "clean-room"
+    clean.mkdir()
+    (clean / "b.txt").write_text(CLEAN, encoding="utf-8")
+    assert _run_gate(tmp_path, clean).returncode == 0
+
+
+@needs_bash
+def test_gate_exit_code_contract_documented(tmp_path: Path) -> None:
+    res = subprocess.run(["bash", str(SW / "data-room-gate.sh"), "--help"],
+                         capture_output=True, text=True, check=False)
+    assert "exit 4" in res.stdout and "WARN" in res.stdout
+    assert "exit 4" in (SW / "data-room-gate.sh").read_text(encoding="utf-8")
+
+
+@needs_bash
+def test_gate_fail_beats_warn_and_skeleton_stays_3(tmp_path: Path) -> None:
+    both = "db password = Sup3rSecretValue\nkey ghp_" + "x" * 20 + "\n"
+    assert _run_gate(tmp_path, _data(tmp_path, {"a.txt": both})).returncode == 1
+    warn = tmp_path / "warn-room"
+    warn.mkdir()
+    (warn / "c.txt").write_text("db password = Sup3rSecretValue\n", encoding="utf-8")
+    assert _run_gate(tmp_path, warn, env={"GATE_ALLOW_SKELETON": "0"}).returncode == 3
+    assert _run_gate(tmp_path, tmp_path / "nope").returncode == 1
+    res = subprocess.run(["bash", str(SW / "data-room-gate.sh")], capture_output=True,
+                         text=True, check=False, env={**os.environ, "DATA_ROOM_DIR": ""})
+    assert res.returncode == 2
+
+
+@needs_bash
+def test_gate_record_path_and_line_exact_when_content_looks_like_grep_output(
+        tmp_path: Path) -> None:
+    res, rec = _record(tmp_path, _data(tmp_path, {"x.txt": "ref:2:PLACEHOLDERWORD\n"}))
+    assert res.returncode == 1
+    assert rec["findings"] == [{"rule": "rule2", "severity": "fail", "path": "x.txt", "line": 1}]
+
+
+@needs_bash
+def test_gate_record_path_with_colon_digits_and_allowlist_still_exact(tmp_path: Path) -> None:
+    data = _data(tmp_path, {"a:7:b.txt": "ok\nPLACEHOLDERWORD\n"})
+    res, rec = _record(tmp_path, data)
+    assert rec["findings"] == [{"rule": "rule2", "severity": "fail", "path": "a:7:b.txt", "line": 2}]
+    ok = _run_gate(tmp_path, data, allowlist="a:7:b.txt:2:PLACEHOLDERWORD\n")
+    assert ok.returncode == 0, ok.stdout
+
+
+def _skeleton_lines() -> list[str]:
+    return (SW / "gate-patterns-skeleton.txt").read_text(encoding="utf-8").splitlines()
+
+
+def _run_with_pattern_text(tmp_path: Path, text: str, mode: str) -> subprocess.CompletedProcess:
+    data = _data(tmp_path, {"a.txt": CLEAN})
+    if mode == "skeleton":
+        return _run_gate(tmp_path, data, skeleton_text=text)
+    pf = tmp_path / "patterns-bad.txt"
+    pf.write_text(text, encoding="utf-8")
+    env = {"GATE_PATTERN_FILE": str(pf),
+           "GATE_PATTERN_SHA256": hashlib.sha256(pf.read_bytes()).hexdigest()}
+    return _run_gate(tmp_path, data, env=env)
+
+
+def _mutations() -> dict[str, str]:
+    base = _skeleton_lines()
+    rule1 = next(i for i, ln in enumerate(base) if ln.startswith("1.pattern "))
+    bare = list(base)
+    bare[rule1] = "1.pattern"
+    blank = list(base)
+    blank[rule1] = "1.pattern    "
+    no_exclude = [ln for ln in base if not ln.startswith("5.exclude")]
+    no_rule6 = [ln for ln in base if not ln.startswith("6.pattern")]
+    return {"bare-key-line": "\n".join(bare) + "\n",
+            "only-1.pattern": "1.pattern\n",
+            "blank-value": "\n".join(blank) + "\n",
+            "duplicate-rule": "\n".join(base + ["4.pattern zzzz"]) + "\n",
+            "unknown-rule": "\n".join(base + ["9.pattern zzzz"]) + "\n",
+            "missing-exclude": "\n".join(no_exclude) + "\n",
+            "missing-rule6": "\n".join(no_rule6) + "\n",
+            "misspelled-field": "\n".join(base + ["1.pattrn zzzz"]) + "\n"}
+
+
+@needs_bash
+@pytest.mark.parametrize("mode", ["full", "skeleton"])
+@pytest.mark.parametrize("name", sorted(_mutations()))
+def test_gate_pattern_set_is_strict_fail_closed(tmp_path: Path, mode: str, name: str) -> None:
+    res = _run_with_pattern_text(tmp_path, _mutations()[name], mode)
+    assert res.returncode == 1, (name, mode, res.stdout)
+    assert "模式集" in res.stdout
+
+
+@needs_bash
+def test_gate_pattern_set_valid_full_still_passes(tmp_path: Path) -> None:
+    res = _run_with_pattern_text(tmp_path, "\n".join(_skeleton_lines()) + "\n", "full")
+    assert res.returncode == 0, res.stdout
+
+
+@needs_bash
+def test_gate_record_has_run_id_and_gate_version(tmp_path: Path) -> None:
+    data = _data(tmp_path, {"a.txt": CLEAN})
+    _, rec1 = _record(tmp_path, data)
+    _, rec2 = _record(tmp_path, data)
+    assert uuid.UUID(rec1["run_id"]).version == 4
+    assert rec1["run_id"] != rec2["run_id"]
+    assert rec1["gate_version"] and rec1["gate_version"] == rec2["gate_version"]
+    assert rec1["gate_version"] in (SW / "data-room-gate.sh").read_text(encoding="utf-8")
+
+
+def _fp_from(out: str) -> str:
+    import re
+
+    m = re.search(r"fp=([0-9a-f]+)\]", out)
+    assert m, out
+    return m.group(1)
+
+
+@needs_bash
+def test_gate_fingerprint_is_full_sha256_by_default(tmp_path: Path) -> None:
+    content = "launch Nov 1955"
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": content + "\n"}))
+    assert _fp_from(res.stdout) == hashlib.sha256(content.encode()).hexdigest()
+
+
+@needs_bash
+def test_gate_fingerprint_is_hmac_when_key_set(tmp_path: Path) -> None:
+    import hmac
+
+    content = "launch Nov 1955"
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": content + "\n"}),
+                    env={"GATE_FP_KEY": "synthetic-test-key"})
+    want = hmac.new(b"synthetic-test-key", content.encode(), hashlib.sha256).hexdigest()
+    assert _fp_from(res.stdout) == want
+
+
+@needs_bash
+def test_gate_allowlist_fp_entry_uses_same_function_as_emitted_fp(tmp_path: Path) -> None:
+    import hmac
+
+    content = "launch Nov 1955"
+    data = _data(tmp_path, {"a.txt": content + "\n"})
+    subject = ("a.txt:1:" + content).encode()
+    plain = "fp:" + hashlib.sha256(subject).hexdigest() + "\n"
+    keyed = "fp:" + hmac.new(b"k1", subject, hashlib.sha256).hexdigest() + "\n"
+    assert _run_gate(tmp_path, data, allowlist=plain).returncode == 0
+    assert _run_gate(tmp_path, data, allowlist=keyed).returncode == 1
+    # with a key set, only the keyed entry exempts; the offline-computable one must not
+    assert _run_gate(tmp_path, data, allowlist=plain, env={"GATE_FP_KEY": "k1"}).returncode == 1
+    assert _run_gate(tmp_path, data, allowlist=keyed, env={"GATE_FP_KEY": "k1"}).returncode == 0
