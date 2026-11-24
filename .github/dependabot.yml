@@ -15,3 +15,9 @@ updates:
       interval: "weekly"
     labels: ["dependencies"]
     open-pull-requests-limit: 5
+    groups:
+      # All github/codeql-action steps must move together: CodeQL fails when
+      # init and analyze run different versions in one workflow, so per-step
+      # Dependabot PRs (#29, #31) can never go green on their own.
+      codeql-action:
+        patterns: ["github/codeql-action*"]
