@@ -10,6 +10,8 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- CI 并发取消只作用于 PR：此前 `cancel-in-progress: true` 也作用于 push 到 main，新合并会取消上一合并提交的 CI，main 上出现从未跑完检查的提交（`43deff6`、`365cc97`，#6 §3.8）/ CI on main is never cancelled.
+- CI 新增 `Gate 3 browser tests (Chrome)` job：用 runner 预装 Chrome 实跑 `tests/test_gate3_browser.py`（此前在 CI 中全部 skip），playwright 驱动经 `requirements-gate3.txt` 哈希锁定安装；`GATE3_BROWSER_REQUIRED=1` 使缺浏览器即失败而非 skip；放开 Ubuntu 24.04 的 AppArmor 用户命名空间限制以保留 Chrome 沙箱（#26）/ CI runs the gate 3 browser tests.
 - 门禁 1 指纹语义过渡标注（中枢 2026-11-20 裁定）：打印 fp 哈希「行内容」、allowlist `fp:` 条目哈希「相对路径:行号:内容」，两面语义不同、不可互比、不可互抄——脚本头注与 `--help` 输出已显名标注；统一至「相对路径:行号:内容」并入批 2 与 ARCH-3 指纹重注册同批落码 / gate 1 fingerprint inputs are labelled as non-interchangeable pending unification in batch 2.
 - 门禁 1 批次 1（#6 评分卡 §3.1 F/L/K/I/J、§3.3、§3.4）/ gate 1 batch 1:
   - **退出码契约变更**：仅 WARN 级命中改为 exit 4（此前与 PASS 同为 0、不可区分）；0=PASS、1=FAIL、2=用法错误、3=NON-BINDING 不变；优先级 1 > 3 > 4 > 0；运行记录 `result: WARN` 对应 `exit_code: 4`。依赖"退出码 0 即放行"的流水线须同步处理 4（人工复核后放行）/ **exit-code contract change**: WARN-only runs now exit 4.

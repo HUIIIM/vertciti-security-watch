@@ -10,7 +10,10 @@ permissions:
   contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded runs on PR branches only. On main a newer merge used to
+  # cancel the previous merge's run, leaving main commits whose checks never
+  # finished (43deff6, 365cc97); every main commit must run to completion.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   python:
     name: Python syntax check (py_compile)
@@ -38,6 +41,28 @@ jobs:
         run: ruff check .
       - name: Run tests (pytest)
         run: python -m pytest -q
+  gate3-browser:
+    name: Gate 3 browser tests (Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Install test tools and the playwright driver (hash-locked)
+        run: python -m pip install --require-hashes -r requirements-gate3.txt
+      - name: Let Chrome use its sandbox
+        # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor, which
+        # Chrome's sandbox needs; gate 3 keeps the sandbox on for non-root runs.
+        run: |
+          f=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -e "$f" ]; then echo 0 | sudo tee "$f"; fi
+      - name: Run gate 3 browser tests
+        env:
+          TOUCH_TARGET_CHROME: /usr/bin/google-chrome
+          GATE3_BROWSER_REQUIRED: "1"  # a missing browser fails the job, never skips
+        run: python -m pytest -q tests/test_gate3_browser.py
   shell:
     name: Shell scripts (shellcheck)
     runs-on: ubuntu-latest
