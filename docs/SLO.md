@@ -21,7 +21,13 @@ This page defines service-level objectives for the three vertciti gates themselv
 
 ## 告警 / Alerting
 
-`scripts/run-log.py slo <LOG>` 计算两条 SLO。出现以下任一情况时，它打印 `[ALERT]` 行并以 exit 1 退出：违约、哈希链断开、日志不存在、窗口内无数据。告警通道是调用方：按计划运行 `slo` 的任务（定时监控 workflow，见后续 PR）把非 0 退出转成告警 issue。
+`scripts/run-log.py slo <LOG>` 计算两条 SLO。出现以下任一情况时，它打印 `[ALERT]` 行并以 exit 1 退出：违约、哈希链断开、日志不存在、窗口内无数据。告警通道是 `.github/workflows/monitor.yml`，每日一次加手动触发：
+
+1. `probe` job 只持只读令牌，不保留凭据。它以门禁 2 探测 `https://vertciti.com/` 并写运行记录；`trace_id` 为 `monitor-<run_id>-<attempt>`。
+2. `record` job 把记录追加进 `monitor/run-log` 分支的 `runs.jsonl`，这条分支只由本 job 推送，不是 main。probe 没产出记录时记一次 `ERROR`，这次中断照样计入 SLO-1。随后跑 `slo --gates homepage-200`。
+3. 门禁不是 `PASS`、或 SLO 违约时，开一个 `[monitor-alert]` issue；已有打开的就追加评论；本次运行标红。下一次健康运行时评论并关闭该 issue。
+
+目前只监控门禁 2。门禁 3 需要 Playwright 与浏览器，待 #35 的 CI 依赖入 main 后接入；门禁 1 的 data-room 不在本仓，由发布流水线负责（#25）。
 
 ## 未覆盖 / Not covered
 

@@ -1,0 +1,134 @@
+# Scheduled monitor (SOTA OPS-2 alerting; docs/SLO.md).
+#
+# Daily: gate 2 probes https://vertciti.com/ and writes a run record; the record is
+# appended to the hash-chained run log kept on the `monitor/run-log` branch;
+# `scripts/run-log.py slo` checks the SLOs. A gate FAIL, a missing record or an SLO
+# breach opens (or updates) one open "[monitor-alert]" issue; the next healthy run
+# comments and closes it.
+#
+# Least privilege: the probe job, which makes the outbound request, holds only a
+# read token and no persisted credentials; only the record job can push (to the
+# monitor/run-log branch, never main) and write issues. No untrusted input: the
+# workflow has no pull_request trigger, and job outputs reach scripts only through env.
+name: Monitor
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: monitor
+  cancel-in-progress: false   # appends must not race or be dropped
+jobs:
+  probe:
+    name: Gate 2 probe (vertciti.com)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      record: ${{ steps.gate.outputs.record }}
+      exit_code: ${{ steps.gate.outputs.exit_code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run gate 2
+        id: gate
+        env:
+          GATE_JSON_OUT: ${{ runner.temp }}/homepage-200.json
+          GATE_TRACE_ID: monitor-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set +e
+          bash qa-gates/homepage-200-check.sh https://vertciti.com/
+          rc=$?
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          if [ -s "$GATE_JSON_OUT" ]; then
+            echo "record=$(base64 -w0 "$GATE_JSON_OUT")" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0   # the verdict travels in the record; the record job alerts on it
+
+  record:
+    name: Append run log, check SLOs, alert
+    needs: probe
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # push the run log to the monitor/run-log branch only
+      issues: write     # open / update / close the monitor alert issue
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RECORD_B64: ${{ needs.probe.outputs.record }}
+      GATE_EXIT: ${{ needs.probe.outputs.exit_code }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      GATE_TRACE_ID: monitor-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Append the record to the run log
+        id: log
+        run: |
+          set -eu
+          rec="$RUNNER_TEMP/record.json"
+          if [ -n "$RECORD_B64" ]; then
+            printf '%s' "$RECORD_B64" | base64 -d > "$rec"
+          else
+            # probe died before writing a record: log an ERROR run so SLO-1 counts it
+            printf '{"reason": "probe produced no run record"}' > "$RUNNER_TEMP/detail.json"
+            python3 -I qa-gates/run_record.py write "$rec" homepage-200 99 \
+              qa-gates/homepage-200-check.sh "$RUNNER_TEMP/detail.json"
+          fi
+          result="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["result"])' "$rec")"
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch --depth=1 origin monitor/run-log 2>/dev/null; then
+            git worktree add "$RUNNER_TEMP/runlog" FETCH_HEAD
+            git -C "$RUNNER_TEMP/runlog" checkout -B monitor/run-log
+          else
+            git worktree add --orphan -b monitor/run-log "$RUNNER_TEMP/runlog"
+          fi
+          python3 -I scripts/run-log.py append "$RUNNER_TEMP/runlog/runs.jsonl" "$rec"
+          git -C "$RUNNER_TEMP/runlog" add runs.jsonl
+          git -C "$RUNNER_TEMP/runlog" commit -q -m "monitor: homepage-200 $result ($GATE_TRACE_ID)"
+          git -C "$RUNNER_TEMP/runlog" push -q origin monitor/run-log
+      - name: Check SLOs
+        id: slo
+        if: ${{ always() }}
+        run: |
+          set +e
+          python3 -I scripts/run-log.py slo "$RUNNER_TEMP/runlog/runs.jsonl" \
+            --gates homepage-200 | tee "$RUNNER_TEMP/slo.txt"
+          echo "breach=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+      - name: Open, update or close the alert issue
+        if: ${{ always() }}
+        env:
+          RESULT: ${{ steps.log.outputs.result }}
+          SLO_BREACH: ${{ steps.slo.outputs.breach }}
+        run: |
+          set -eu
+          title="[monitor-alert] vertciti.com gate monitor"
+          open="$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')"
+          body="$RUNNER_TEMP/alert.md"
+          {
+            echo "Run: $RUN_URL"
+            echo "Trace: \`$GATE_TRACE_ID\` · gate 2 result: \`${RESULT:-none}\` (exit ${GATE_EXIT:-none}) · SLO check exit: \`${SLO_BREACH:-none}\`"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/slo.txt" 2>/dev/null || echo "(no SLO output)"
+            echo '```'
+            echo
+            echo "SLO definitions: docs/SLO.md. Run log: branch monitor/run-log, file runs.jsonl."
+          } > "$body"
+          if [ "${RESULT:-}" = "PASS" ] && [ "${SLO_BREACH:-1}" = "0" ]; then
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --body-file "$body"
+              gh issue close "$open" --comment "Recovered: gate 2 PASS and SLOs met."
+            fi
+            exit 0
+          fi
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body-file "$body"
+          else
+            gh issue create --title "$title" --body-file "$body"
+          fi
+          exit 1   # a red run is part of the alert
