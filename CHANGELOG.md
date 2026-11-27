@@ -10,6 +10,7 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Added
+- 定时监控 `.github/workflows/monitor.yml`（OPS-2 告警）：每日以门禁 2 探测 vertciti.com，运行记录追加进 `monitor/run-log` 分支的哈希链日志，按 `docs/SLO.md` 检查 SLO。门禁失败或 SLO 违约时开或更新一个 `[monitor-alert]` issue，恢复后自动关闭。最小权限：探测 job 只读；只有记录 job 能推送 run-log 分支、写 issue / scheduled monitor with alerting.
 - 门禁运行可观测性（SOTA OPS-2，#6 路线图第 3 项、#25）/ gate run observability:
   - 门禁 2、3 支持 `GATE_JSON_OUT` 运行记录（`qa-gates/run_record.py`，schema `vertciti-qa-gate/1`），与门禁 1 同契约：每次运行（含中途退出）都写，写不出即 exit 1。核心字段 `gate`、`run_id`、`trace_id`、`started_at`/`finished_at`/`duration_ms`、`result`、`exit_code`、`script_sha256`；门禁 2 另记目标、钉住地址、实际连接地址、状态码与失败原因，门禁 3 另记逐路由量取数、违规选择器与尺寸、render error，不含页面文字 / gates 2 and 3 write run records.
   - 三道门禁共用 `trace_id`：发布流水线设 `GATE_TRACE_ID` 时，同一次发布的三份记录可关联；未设时取本次 `run_id`。门禁 1 记录新增 `trace_id` 与 `gate` 字段 / shared trace_id across gates.
