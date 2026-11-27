@@ -37,7 +37,7 @@ GATE_STARTED_AT="$(date +%s%3N)"; export GATE_STARTED_AT
 
 # 运行记录（OPS-2）：设 GATE_JSON_OUT=<路径> 时，每次运行（含中途退出）结束都写 JSON 记录，
 # 与门禁 1 同核心字段（run_id、trace_id、result、exit_code 等，见 run_record.py）；
-# 本门禁另记 target、http_code、remote_ip、pinned_ip、egress_exempt、reason，不含响应内容。
+# 本门禁另记 target、http_code、remote_ip、pinned_ips（逗号分隔）、egress_exempt、reason，不含响应内容。
 # 要求了记录却写不出即 exit 1（fail-closed）。
 D_HOST=""; D_IP=""; D_REMOTE=""; D_CODE=""; D_EXEMPT=0; D_REASON=""
 on_exit() {
@@ -45,7 +45,7 @@ on_exit() {
   if [ -n "${GATE_JSON_OUT:-}" ]; then
     detail="$(mktemp)"
     if ! "$PY" -I -c 'import json, sys
-k = ["target", "host", "pinned_ip", "remote_ip", "http_code", "egress_exempt", "reason"]
+k = ["target", "host", "pinned_ips", "remote_ip", "http_code", "egress_exempt", "reason"]
 v = sys.argv[2:]
 d = dict(zip(k, [x or None for x in v]))
 d["egress_exempt"] = v[5] == "1"
