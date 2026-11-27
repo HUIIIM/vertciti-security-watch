@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -998,3 +999,151 @@ def test_gate_allowlist_fp_entry_uses_same_function_as_emitted_fp(tmp_path: Path
     # with a key set, only the keyed entry exempts; the offline-computable one must not
     assert _run_gate(tmp_path, data, allowlist=plain, env={"GATE_FP_KEY": "k1"}).returncode == 1
     assert _run_gate(tmp_path, data, allowlist=keyed, env={"GATE_FP_KEY": "k1"}).returncode == 0
+
+
+# ---- OPS-2: gate 2/3 run records, shared trace_id, hash-chained run log, SLO check ----
+
+RUN_LOG = ROOT / "scripts" / "run-log.py"
+CORE_FIELDS = {"schema", "gate", "gate_version", "run_id", "trace_id", "started_at",
+               "finished_at", "duration_ms", "result", "exit_code", "script_sha256"}
+
+
+@needs_bash
+@needs_curl
+def test_gate2_writes_run_record_on_pass(tmp_path: Path, http_server: str) -> None:
+    out = tmp_path / "rec.json"
+    env = {**os.environ, "NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1",
+           "HOMEPAGE_CHECK_TIMEOUT": "5", "QA_EGRESS_ALLOW_HOSTS": "127.0.0.1",
+           "GATE_JSON_OUT": str(out), "GATE_TRACE_ID": "release-42"}
+    res = subprocess.run(["bash", str(QA / "homepage-200-check.sh"), http_server + "/200"],
+                         capture_output=True, text=True, env=env, check=False)
+    assert res.returncode == 0, res.stdout
+    rec = json.loads(out.read_text(encoding="utf-8"))
+    assert CORE_FIELDS <= set(rec)
+    assert rec["gate"] == "homepage-200" and rec["result"] == "PASS" and rec["exit_code"] == 0
+    assert rec["trace_id"] == "release-42" and rec["run_id"] != "release-42"
+    assert rec["http_code"] == "200" and rec["remote_ip"] == "127.0.0.1"
+    assert rec["egress_exempt"] is True
+
+
+@needs_bash
+def test_gate2_writes_run_record_on_refusal_and_fails_closed(tmp_path: Path) -> None:
+    out = tmp_path / "rec.json"
+    env = {**os.environ, "GATE_JSON_OUT": str(out), "QA_EGRESS_ALLOW_HOSTS": ""}
+    res = subprocess.run(["bash", str(QA / "homepage-200-check.sh"), "http://10.0.0.1/"],
+                         capture_output=True, text=True, env=env, check=False)
+    assert res.returncode == 1
+    rec = json.loads(out.read_text(encoding="utf-8"))
+    assert rec["result"] == "FAIL" and "SEC-A2" in rec["reason"]
+    assert rec["trace_id"] == rec["run_id"]
+    env["GATE_JSON_OUT"] = str(tmp_path / "missing-dir" / "rec.json")
+    bad = subprocess.run(["bash", str(QA / "homepage-200-check.sh"), "http://10.0.0.1/"],
+                         capture_output=True, text=True, env=env, check=False)
+    assert bad.returncode == 1 and "运行记录写入失败" in bad.stdout
+
+
+@needs_bash
+def test_gate3_writes_run_record_on_early_exit(tmp_path: Path) -> None:
+    out = tmp_path / "rec.json"
+    env = {k: v for k, v in os.environ.items() if k != "TOUCH_TARGET_PROD_FILE"}
+    env["GATE_JSON_OUT"] = str(out)
+    res = subprocess.run(["bash", str(QA / "touch-target-check.sh")],
+                         capture_output=True, text=True, env=env, check=False)
+    assert res.returncode == 2
+    rec = json.loads(out.read_text(encoding="utf-8"))
+    assert CORE_FIELDS <= set(rec)
+    assert rec["gate"] == "touch-target" and rec["result"] == "USAGE"
+    assert "before measuring" in rec["reason"]
+
+
+@needs_bash
+def test_gate1_record_carries_trace_id(tmp_path: Path) -> None:
+    data = _data(tmp_path, {"a.txt": CLEAN})
+    _, rec = _record(tmp_path, data, GATE_TRACE_ID="release-42")
+    assert rec["trace_id"] == "release-42" and rec["gate"] == "data-room"
+    _, rec = _record(tmp_path, data)
+    assert rec["trace_id"] == rec["run_id"]
+
+
+def _write_rec(tmp_path: Path, name: str, gate: str, result: str, finished: str) -> Path:
+    p = tmp_path / name
+    p.write_text(json.dumps({"gate": gate, "run_id": name, "trace_id": name, "result": result,
+                             "exit_code": 0, "finished_at": finished}), encoding="utf-8")
+    return p
+
+
+def _runlog(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(RUN_LOG), *args],
+                          capture_output=True, text=True, check=False)
+
+
+NOW = "2026-11-27T12:00:00+00:00"
+
+
+def _fresh_log(tmp_path: Path, results: list[str]) -> Path:
+    log = tmp_path / "runs.jsonl"
+    recs = []
+    for i, r in enumerate(results):
+        for gate in ("data-room", "homepage-200", "touch-target"):
+            recs.append(str(_write_rec(tmp_path, "%s-%d.json" % (gate, i), gate, r,
+                                       "2026-11-27T%02d:00:00+00:00" % (i % 12))))
+    assert _runlog("append", str(log), *recs).returncode == 0
+    return log
+
+
+def test_run_log_chain_verifies_and_detects_tampering(tmp_path: Path) -> None:
+    log = _fresh_log(tmp_path, ["PASS", "FAIL"])
+    ok = _runlog("verify", str(log))
+    assert ok.returncode == 0 and "6 entries" in ok.stdout
+    lines = log.read_text(encoding="utf-8").splitlines()
+    for tamper in (lines[:2] + lines[3:],                       # a line removed
+                   [lines[1], lines[0]] + lines[2:],            # reordered
+                   [lines[0].replace("PASS", "WARN")] + lines[1:]):  # edited
+        log.write_text("\n".join(tamper) + "\n", encoding="utf-8")
+        res = _runlog("verify", str(log))
+        assert res.returncode == 1 and "chain broken" in res.stdout
+        app = _runlog("append", str(log), str(_write_rec(tmp_path, "x.json", "data-room",
+                                                           "PASS", NOW)))
+        assert app.returncode == 1 and "refusing to append" in app.stderr
+
+
+def test_run_log_entries_carry_record_hash(tmp_path: Path) -> None:
+    rec = _write_rec(tmp_path, "r.json", "homepage-200", "PASS", NOW)
+    log = tmp_path / "runs.jsonl"
+    assert _runlog("append", str(log), str(rec)).returncode == 0
+    entry = json.loads(log.read_text(encoding="utf-8"))
+    assert entry["record_sha256"] == hashlib.sha256(rec.read_bytes()).hexdigest()
+    assert entry["prev_sha256"] == "0" * 64 and "findings" not in entry
+
+
+def test_slo_passes_when_fresh_and_binding(tmp_path: Path) -> None:
+    log = _fresh_log(tmp_path, ["PASS", "FAIL", "WARN"])  # FAIL is a verdict: gate did its job
+    res = _runlog("slo", str(log), "--now", NOW)
+    assert res.returncode == 0, res.stdout
+    assert "[SLO-1] verdict rate 100.00%" in res.stdout and "[ALERT]" not in res.stdout
+
+
+@pytest.mark.parametrize("bad", ["ERROR", "USAGE", "NON-BINDING"])
+def test_slo1_alerts_on_non_binding_runs(tmp_path: Path, bad: str) -> None:
+    log = _fresh_log(tmp_path, ["PASS"] * 9 + [bad])
+    res = _runlog("slo", str(log), "--now", NOW)
+    assert res.returncode == 1 and "[ALERT] SLO-1 breached" in res.stdout
+
+
+def test_slo2_alerts_on_stale_or_missing_gate(tmp_path: Path) -> None:
+    log = _fresh_log(tmp_path, ["PASS"])
+    res = _runlog("slo", str(log), "--now", "2026-11-29T12:00:00+00:00")
+    assert res.returncode == 1 and res.stdout.count("[ALERT] SLO-2 breached") == 3
+    res = _runlog("slo", str(log), "--now", NOW, "--gates", "data-room shadow")
+    assert res.returncode == 1 and "SLO-2 breached: shadow" in res.stdout
+
+
+def test_slo_alerts_on_missing_or_tampered_log(tmp_path: Path) -> None:
+    res = _runlog("slo", str(tmp_path / "none.jsonl"), "--now", NOW)
+    assert res.returncode == 1 and "does not exist" in res.stdout
+    log = _fresh_log(tmp_path, ["PASS"])
+    lines = log.read_text(encoding="utf-8").splitlines()
+    log.write_text("\n".join([lines[0].replace("PASS", "FAIL")] + lines[1:]) + "\n",
+                   encoding="utf-8")
+    res = _runlog("slo", str(log), "--now", NOW)
+    assert res.returncode == 1 and "integrity" in res.stdout

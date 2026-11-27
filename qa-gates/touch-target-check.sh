@@ -46,6 +46,31 @@ fi
 
 PROD_FILE="${TOUCH_TARGET_PROD_FILE:-}"
 URL="${1:-$PROD_FILE}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GATE_STARTED_AT="$(date +%s%3N)"; export GATE_STARTED_AT
+
+# 运行记录（OPS-2）：设 GATE_JSON_OUT=<路径> 时，每次运行（含中途退出）结束都写 JSON 记录，
+# 与门禁 1/2 同核心字段（run_id、trace_id、result、exit_code 等，见 run_record.py）；本门禁另记
+# 逐路由量取数、违规的选择器与尺寸、render error 文本（URL 与原因，不含页面文字）。
+# 要求了记录却写不出即 exit 1（fail-closed）。
+GATE_DETAIL="$(mktemp)"; export GATE_DETAIL
+on_exit() {
+  local rc=$? rec_py="${TOUCH_TARGET_PYTHON:-}"
+  [ -x "$rec_py" ] || rec_py=python3
+  if [ -n "${GATE_JSON_OUT:-}" ]; then
+    if [ ! -s "$GATE_DETAIL" ]; then
+      printf '{"target": %s, "reason": "gate exited before measuring (exit %d)"}' \
+        "$("$rec_py" -I -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$URL")" "$rc" > "$GATE_DETAIL"
+    fi
+    if ! "$rec_py" -I "$SCRIPT_DIR/run_record.py" write "$GATE_JSON_OUT" touch-target "$rc" "${BASH_SOURCE[0]}" "$GATE_DETAIL"; then
+      echo "[FAIL] run record not written to $GATE_JSON_OUT - fail-closed" >&2
+      rc=1
+    fi
+  fi
+  rm -f "$GATE_DETAIL"
+  exit "$rc"
+}
+trap on_exit EXIT
 
 if [ -z "$URL" ]; then
   echo "[FAIL] no target: pass a URL argument, or set TOUCH_TARGET_PROD_FILE to the production index.html file:// URL" >&2
@@ -69,7 +94,6 @@ fi
 # that file is absent too, the Python below falls back to its built-in
 # hash-route defaults. The effective source is logged so a gate run shows
 # which table it measured with.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROUTES_FILE="$SCRIPT_DIR/touch-target-routes.txt"
 # The file holds the live site's real paths, so it only applies to http(s)
 # targets: for a file:// target (the production index.html, which routes by
@@ -354,6 +378,30 @@ if violations:
         print("  route=%s" % key)
         print("    text=<%s> sel=%s size=%.1fx%.1f pos=(%d,%d)" % (
             txt, e["selector"], e["w"], e["h"], e["x"], e["y"]))
+
+
+def write_detail():
+    """Gate-specific fields for the run record (no page text: selectors, sizes, URLs only)."""
+    import json
+    detail = {
+        "target": URL,
+        "viewport_px": 390,
+        "min_px": MIN,
+        "sandbox": "off" if no_sandbox else "on",
+        "egress_exempt_hosts": sorted(_exempt_logged),
+        "routes": [{"route": k, "checked": c, "exempt": x} for k, (c, x) in stats.items()],
+        "checked": total_c,
+        "violations": [{"route": k, "tag": e["tag"], "selector": e["selector"],
+                        "w": e["w"], "h": e["h"]} for k, e in violations],
+        "render_errors": errors[:50],
+    }
+    with open(os.environ["GATE_DETAIL"], "w", encoding="utf-8") as f:
+        json.dump(detail, f, ensure_ascii=False)
+
+
+if os.environ.get("GATE_DETAIL"):
+    write_detail()
+
 if violations or errors:
     print("\nRESULT: [FAIL] %d violation(s), %d render error(s)" % (len(violations), len(errors)))
     sys.exit(1)

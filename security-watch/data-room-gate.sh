@@ -144,9 +144,13 @@ for row in open(findings, encoding="utf-8", errors="replace"):
     path = unesc(path)
     hits.append({"rule": rule, "severity": severity, "path": path or None,
                  "line": int(line) if line.isdigit() else None})
+run_id = str(uuid.uuid4())
 record = {
     "schema": "vertciti-data-room-gate/1",
-    "run_id": str(uuid.uuid4()),
+    "run_id": run_id,
+    # trace_id: GATE_TRACE_ID set by the release pipeline correlates gates 1-3 of one release (OPS-2)
+    "trace_id": os.environ.get("GATE_TRACE_ID") or run_id,
+    "gate": "data-room",
     "gate_version": version,
     "finished_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     "result": result,
