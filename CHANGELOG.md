@@ -10,6 +10,7 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 ## [Unreleased]
 
 ### Security
+- 门禁 2/3 出站地址校验（SOTA SEC-A2，#6 路线图第 2 项）：新增 `qa-gates/egress_guard.py`。每一跳在连接前解析主机，全部解析地址都必须是公网单播地址：环回、RFC 1918 私网、链路本地（含 169.254.169.254 元数据地址）、CGNAT、保留段及其 IPv4 映射 / NAT64 形式一律拒绝，解析失败也拒，FAIL exit 1。门禁 2 用 `--resolve` 钉住已校验地址、`--noproxy '*'` 直连、`--proto =http,https`，连接后核对 `%{remote_ip}`。门禁 3 以 Playwright `route` / `route_web_socket` 拦截全部请求（导航、子资源、WebSocket）。http(s) 请求由拦截器以 `max_redirects=0` 取回，浏览器永远拿不到 3xx，因为 Playwright 只拦截重定向链的第一跳：实测 302 到 localhost 的那一跳已经连上了服务器。**导航被重定向即 FAIL**（同门禁 2，路由表须列最终地址）；子资源的重定向由拦截器逐跳校验后再取回，最多 5 跳。浏览器自行发出的连接核对 `server_addr()`；以 `--no-proxy-server` 直连并禁用 Service Worker。残余风险：拦截器取回时由 Playwright 自行解析 DNS，校验与连接之间的 DNS 重绑定无法核对实际地址。**行为变更**：两道门禁不再经代理出站，只有代理出口的环境会 FAIL（fail-closed）。`QA_EGRESS_ALLOW_HOSTS` 只用于测试豁免指定主机，每次使用都打印 `[egress]` 行 / gates 2 and 3 address-check every outbound hop and refuse non-public destinations.
 - 门禁 1 指纹语义过渡标注（中枢 2026-11-20 裁定）：打印 fp 哈希「行内容」、allowlist `fp:` 条目哈希「相对路径:行号:内容」，两面语义不同、不可互比、不可互抄——脚本头注与 `--help` 输出已显名标注；统一至「相对路径:行号:内容」并入批 2 与 ARCH-3 指纹重注册同批落码 / gate 1 fingerprint inputs are labelled as non-interchangeable pending unification in batch 2.
 - 门禁 1 批次 1（#6 评分卡 §3.1 F/L/K/I/J、§3.3、§3.4）/ gate 1 batch 1:
   - **退出码契约变更**：仅 WARN 级命中改为 exit 4（此前与 PASS 同为 0、不可区分）；0=PASS、1=FAIL、2=用法错误、3=NON-BINDING 不变；优先级 1 > 3 > 4 > 0；运行记录 `result: WARN` 对应 `exit_code: 4`。依赖"退出码 0 即放行"的流水线须同步处理 4（人工复核后放行）/ **exit-code contract change**: WARN-only runs now exit 4.
