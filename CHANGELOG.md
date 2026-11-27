@@ -9,6 +9,12 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 
 ## [Unreleased]
 
+### Added
+- 门禁运行可观测性（SOTA OPS-2，#6 路线图第 3 项、#25）/ gate run observability:
+  - 门禁 2、3 支持 `GATE_JSON_OUT` 运行记录（`qa-gates/run_record.py`，schema `vertciti-qa-gate/1`），与门禁 1 同契约：每次运行（含中途退出）都写，写不出即 exit 1。核心字段 `gate`、`run_id`、`trace_id`、`started_at`/`finished_at`/`duration_ms`、`result`、`exit_code`、`script_sha256`；门禁 2 另记目标、钉住地址、实际连接地址、状态码与失败原因，门禁 3 另记逐路由量取数、违规选择器与尺寸、render error，不含页面文字 / gates 2 and 3 write run records.
+  - 三道门禁共用 `trace_id`：发布流水线设 `GATE_TRACE_ID` 时，同一次发布的三份记录可关联；未设时取本次 `run_id`。门禁 1 记录新增 `trace_id` 与 `gate` 字段 / shared trace_id across gates.
+  - `scripts/run-log.py`：只追加、带哈希链的运行日志（`append` / `verify`），行被改、删或调序都可检出；`slo` 子命令计算 SLO-1 判定率（≥ 99 %，30 天）与 SLO-2 新鲜度（每道门禁 26 h 内有运行）。违约、断链或无数据即打印 `[ALERT]` 并 exit 1。SLO 定义见 `docs/SLO.md` / hash-chained run log and SLO check.
+
 ### Security
 - 门禁 2/3 出站地址校验（SOTA SEC-A2，#6 路线图第 2 项）：新增 `qa-gates/egress_guard.py`。每一跳在连接前解析主机，全部解析地址都必须是公网单播地址：环回、RFC 1918 私网、链路本地（含 169.254.169.254 元数据地址）、CGNAT、保留段及其 IPv4 映射 / NAT64 形式一律拒绝，解析失败也拒，FAIL exit 1。门禁 2 用 `--resolve` 钉住已校验地址、`--noproxy '*'` 直连、`--proto =http,https`，连接后核对 `%{remote_ip}`。门禁 3 以 Playwright `route` / `route_web_socket` 拦截全部请求（导航、子资源、WebSocket）。http(s) 请求由拦截器以 `max_redirects=0` 取回，浏览器永远拿不到 3xx，因为 Playwright 只拦截重定向链的第一跳：实测 302 到 localhost 的那一跳已经连上了服务器。**导航被重定向即 FAIL**（同门禁 2，路由表须列最终地址）；子资源的重定向由拦截器逐跳校验后再取回，最多 5 跳。浏览器自行发出的连接核对 `server_addr()`；以 `--no-proxy-server` 直连并禁用 Service Worker。残余风险：拦截器取回时由 Playwright 自行解析 DNS，校验与连接之间的 DNS 重绑定无法核对实际地址。**行为变更**：两道门禁不再经代理出站，只有代理出口的环境会 FAIL（fail-closed）。`QA_EGRESS_ALLOW_HOSTS` 只用于测试豁免指定主机，每次使用都打印 `[egress]` 行 / gates 2 and 3 address-check every outbound hop and refuse non-public destinations.
 - 门禁 1 指纹语义过渡标注（中枢 2026-11-20 裁定）：打印 fp 哈希「行内容」、allowlist `fp:` 条目哈希「相对路径:行号:内容」，两面语义不同、不可互比、不可互抄——脚本头注与 `--help` 输出已显名标注；统一至「相对路径:行号:内容」并入批 2 与 ARCH-3 指纹重注册同批落码 / gate 1 fingerprint inputs are labelled as non-interchangeable pending unification in batch 2.

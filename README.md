@@ -72,6 +72,8 @@ vertciti-security-watch/
 
 **出站校验（SOTA SEC-A2）**：门禁 2、3 的每一跳都先经 `qa-gates/egress_guard.py` 校验，目标主机的全部解析地址都必须是公网单播地址，连接后再核对实际连接地址（门禁 2 看 curl 的 `%{remote_ip}`，门禁 3 看 Playwright 的 `server_addr()`）。门禁 3 不让浏览器自己跟随重定向（Playwright 只拦截重定向链的第一跳）：导航被重定向即 FAIL，路由表须列最终地址；子资源的重定向逐跳校验后再取回。两道门禁都直连、不走代理，因为经代理时无法核对实际地址；只有代理出口的环境会 FAIL。`QA_EGRESS_ALLOW_HOSTS`（空格分隔的精确主机名或 IP）只供本仓测试在 127.0.0.1 上起夹具用，每次豁免都会打印 `[egress]` 行。门禁 2 需要 `python3`（可经 `HOMEPAGE_CHECK_PYTHON` 指定）。
 
+**运行记录与 SLO（OPS-2）**：三道门禁都支持 `GATE_JSON_OUT=<路径>`，结束时写 JSON 运行记录（含 `run_id`、`trace_id`；设 `GATE_TRACE_ID` 时同一次发布的三份记录可关联）。`scripts/run-log.py append` 把记录追加进只追加、带哈希链的日志，`run-log.py slo` 按 `docs/SLO.md` 计算判定率与新鲜度两条 SLO，违约即 `[ALERT]` 并 exit 1。
+
 每道门禁是独立脚本，以退出码向发布流水线报告结果；门禁 2 为 `qa-gates/homepage-200-check.sh`（此前只是文档里一条 `curl -sI … | head -1`，退出码恒为 0）。架构图见
 [docs/assets/architecture.png](docs/assets/architecture.png)。
 

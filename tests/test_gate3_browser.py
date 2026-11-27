@@ -228,3 +228,22 @@ def test_subresource_redirect_to_blocked_host_never_connects(site: str) -> None:
     assert res.returncode == 1, res.stdout + res.stderr
     assert "egress blocked (SEC-A2): redirect" in res.stdout
     assert not [h for h in HITS if h.startswith("localhost")], HITS
+
+
+# ---- OPS-2: run record ----
+
+def test_writes_run_record_with_measurements(tmp_path: Path, site: str) -> None:
+    import json
+    out = tmp_path / "rec.json"
+    os.environ["GATE_JSON_OUT"] = str(out)
+    try:
+        res = _gate(site + "/", "/ /b/", allow="127.0.0.1")
+    finally:
+        del os.environ["GATE_JSON_OUT"]
+    assert res.returncode == 0, res.stdout + res.stderr
+    rec = json.loads(out.read_text(encoding="utf-8"))
+    assert rec["gate"] == "touch-target" and rec["result"] == "PASS"
+    assert [r["route"] for r in rec["routes"]] == ["/", "/b/"]
+    assert rec["checked"] == 3 and rec["violations"] == [] and rec["render_errors"] == []
+    assert rec["egress_exempt_hosts"] == ["127.0.0.1"] and rec["sandbox"] in ("on", "off")
+    assert "home" not in json.dumps(rec["routes"])  # selectors/sizes only, no page text
