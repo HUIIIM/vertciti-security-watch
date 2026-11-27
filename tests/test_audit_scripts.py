@@ -582,6 +582,45 @@ def test_gate2_pins_and_verifies_named_host(http_server: str) -> None:
     assert res.returncode == 0, res.stdout
 
 
+@needs_bash
+@needs_curl
+def test_gate2_pins_every_checked_address_of_a_dual_stack_host() -> None:
+    # Pinning only the first resolved address breaks a dual-stack host whenever
+    # that family is unreachable (CI: localhost -> ::1 first, server on IPv4 only).
+    # Serve on whichever localhost address is NOT first: only an all-address pin passes.
+    import http.server
+    import socket
+    import threading
+
+    addrs = list(dict.fromkeys(i[4][0] for i in socket.getaddrinfo(
+        "localhost", 80, type=socket.SOCK_STREAM)))
+    if len(addrs) < 2:
+        pytest.skip("localhost resolves to a single address here: %s" % addrs)
+    last = addrs[-1]
+
+    class Server(http.server.ThreadingHTTPServer):
+        address_family = socket.AF_INET6 if ":" in last else socket.AF_INET
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    try:
+        srv = Server((last, 0), Handler)
+    except OSError as exc:
+        pytest.skip("cannot listen on %s here: %s" % (last, exc))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        res = _run_gate2("http://localhost:%d/" % srv.server_address[1], allow="localhost")
+    finally:
+        srv.shutdown()
+    assert res.returncode == 0, res.stdout
+
+
 def _egress_guard():
     import importlib.util
     spec = importlib.util.spec_from_file_location("egress_guard", QA / "egress_guard.py")

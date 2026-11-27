@@ -71,18 +71,21 @@ fi
 if ! target="$("$PY" -I "$GUARD" resolve "$URL" 2>&1)"; then
   fail "$URL 出站被拒（SEC-A2）：$target"
 fi
-read -r host port ip <<<"$target"
-D_HOST="$host"; D_IP="$ip"
+read -r host port ips <<<"$target"   # ips: every checked address, comma-separated
+D_HOST="$host"; D_IP="$ips"
 if "$PY" -I "$GUARD" exempt "$host"; then
   D_EXEMPT=1
   echo "[egress] $host 经 QA_EGRESS_ALLOW_HOSTS 豁免非公网检查（仅限测试）"
 fi
 
-# 钉住已校验的地址；IP 字面量主机本身就是连接地址，无需 --resolve。
-resolve_arg=()
+# 钉住已校验的全部地址（curl 在其中自行择一，双栈主机在无 IPv6 路由时可回落 IPv4）；
+# IP 字面量主机本身就是连接地址，无需 --resolve。
+resolve_arg=(); pinned=""
 case "$host" in
   *:*|[0-9]*.[0-9]*.[0-9]*.[0-9]*) ;;
-  *) case "$ip" in *:*) resolve_arg=(--resolve "$host:$port:[$ip]") ;; *) resolve_arg=(--resolve "$host:$port:$ip") ;; esac ;;
+  *) IFS=, read -r -a ip_list <<<"$ips"
+     for a in "${ip_list[@]}"; do case "$a" in *:*) pinned="$pinned,[$a]" ;; *) pinned="$pinned,$a" ;; esac; done
+     resolve_arg=(--resolve "$host:$port:${pinned#,}") ;;
 esac
 
 # 不加 -L：规范地址本身就应返回 200，重定向说明地址或配置变了，需要人看。
@@ -95,8 +98,8 @@ fi
 code="${out%% *}"; remote="${out#* }"
 D_CODE="$code"; D_REMOTE="$remote"
 # 连接后：核对实际连接地址（防 DNS 重绑定与 --resolve 未生效）。
-if [ "${#resolve_arg[@]}" -gt 0 ] && [ "$remote" != "$ip" ]; then
-  fail "$URL 实际连接地址 $remote 与校验地址 $ip 不一致（SEC-A2）"
+if [ "${#resolve_arg[@]}" -gt 0 ] && [[ ",$ips," != *",$remote,"* ]]; then
+  fail "$URL 实际连接地址 $remote 不在校验地址 $ips 之中（SEC-A2）"
 fi
 if ! "$PY" -I "$GUARD" verify "$host" "$remote"; then
   fail "$URL 实际连接地址 $remote 不是公网地址（SEC-A2）"
