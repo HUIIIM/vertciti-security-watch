@@ -19,6 +19,17 @@
 # 依赖: playwright sync_api (解释器经环境变量 TOUCH_TARGET_PYTHON 指定) + Chromium
 #      (默认 /opt/meta-chromium/chrome, 可经环境变量 TOUCH_TARGET_CHROME 覆盖)
 # 注意: localhost 会被 LocalNetworkAccessChecks 拦截, 本地渲染请用 file:// URL。
+# 出站校验 (SOTA SEC-A2): 浏览器发出的每个请求 (导航、子资源、WebSocket) 先经同目录
+#      egress_guard.py 校验: 只放行 http(s)/ws(s) (目标为 file:// 时另放行 file:)、data:、blob:,
+#      主机的全部解析地址必须是公网单播地址 (拒绝环回/私网/链路本地含元数据地址/CGNAT/保留段),
+#      解析失败也拒; 被拒请求记为 render error, 结果 FAIL。http(s) 请求一律由拦截器不跟随重定向
+#      地取回 (route.fetch max_redirects=0), 浏览器永远拿不到 3xx: 导航被重定向即 FAIL (同门禁 2,
+#      只测规范地址, 路由表须列最终地址); 子资源的重定向由拦截器逐跳先校验再取回。
+#      浏览器自行发出的连接再核对实际连接地址 (server_addr)。残余: 拦截器取回时由
+#      Playwright 自行解析 DNS, 校验与连接之间的 DNS 重绑定无法核对实际地址。
+#      浏览器以 --no-proxy-server 直连 (经代理无法核对实际地址);
+#      Service Worker 被禁用 (其请求绕过拦截)。QA_EGRESS_ALLOW_HOSTS (空格分隔的精确主机名/IP)
+#      豁免指定主机, 供本仓测试在 127.0.0.1 起夹具用, 每次豁免打印 [egress] 行。
 # 标注: [PASS]/[FAIL]/[EXEMPT] 均为 ASCII 括号。
 # =====================================================================
 set -u
@@ -29,6 +40,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "  路由表可经 TOUCH_TARGET_ROUTES 覆盖（空格分隔；以 / 开头为真实路径，否则为 #page= 路由名）；环境变量未设时读脚本同目录的 touch-target-routes.txt（发布管线定版表）。所有路由渲染结果相同即 FAIL（路由表与站点不符）。"
   echo "  依赖: playwright (解释器经环境变量 TOUCH_TARGET_PYTHON 指定) + /opt/meta-chromium/chrome"
   echo "  Chromium 沙箱默认开启；以 root 运行或设 TOUCH_TARGET_NO_SANDBOX=1 时关闭（运行日志 [sandbox] 行注明）。"
+  echo "  出站校验（SEC-A2）：每个请求的主机都必须只解析到公网地址，否则 FAIL；QA_EGRESS_ALLOW_HOSTS 仅供测试豁免。"
   exit 0
 fi
 
@@ -75,12 +87,15 @@ else
   echo "[routes] source=default (built-in hash routes)" >&2
 fi
 
-"$PY" - "$URL" <<'PY_EOF'
+"$PY" - "$URL" "$SCRIPT_DIR" <<'PY_EOF'
 import os
 import sys
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 URL = sys.argv[1]
+sys.path.insert(0, sys.argv[2])
+import egress_guard  # noqa: E402  (same directory as this script)
 BASE = URL.split("#")[0]
 
 # 路由名取自生产 index.html 源码 JS (2026-09-27 核验); 无 demo 路由, 故不测。
@@ -148,7 +163,109 @@ JS_COLLECT = """() => {
 violations = []   # (route_key, element)
 exempt = []       # (route_key, element)
 stats = {}        # route_key -> (checked, exempted)
-errors = []       # 加载失败 / JS 报错 / 空路由: 一律 FAIL, 不允许在没量到东西时报 PASS
+errors = []       # 加载失败 / JS 报错 / 空路由 / 出站被拒: 一律 FAIL, 不允许在没量到东西时报 PASS
+
+MAX_REDIRECTS = 5
+_egress_cache = {}  # (scheme, host, port) -> reason or None
+_exempt_logged = set()
+
+
+def egress_reason(url):
+    """None if the request may go out, else why not (SEC-A2)."""
+    from urllib.parse import urlsplit
+    scheme = url.split(":", 1)[0].lower()
+    if scheme in ("data", "blob", "about"):
+        return None
+    if scheme == "file":
+        return None if BASE.startswith("file:") else "file: request from a non-file target"
+    if scheme in ("ws", "wss"):
+        url = ("http" if scheme == "ws" else "https") + url[len(scheme):]
+        scheme = "http" if scheme == "ws" else "https"
+    if scheme not in ("http", "https"):
+        return "scheme %r not allowed" % scheme
+    parts = urlsplit(url)
+    key = (scheme, parts.hostname, parts.port)
+    if key not in _egress_cache:
+        host, _port, _ips, err = egress_guard.check_url(url)
+        _egress_cache[key] = err
+        if err is None and egress_guard.host_exempt(host) and host not in _exempt_logged:
+            _exempt_logged.add(host)
+            print("[egress] %s exempted from the non-public check via QA_EGRESS_ALLOW_HOSTS "
+                  "(tests only)" % host, file=sys.stderr)
+    return _egress_cache[key]
+
+
+def guard_request(route):
+    url = route.request.url
+    reason = egress_reason(url)
+    if reason is not None:
+        errors.append("egress blocked (SEC-A2): %s: %s" % (url[:120], reason))
+        route.abort("blockedbyclient")
+        return
+    if url.split(":", 1)[0].lower() not in ("http", "https"):
+        route.continue_()
+        return
+    # Playwright calls a route handler only for the first URL of a redirect chain,
+    # and the browser follows any 3xx it is handed - even one we fulfil - without
+    # routing the next hop (measured: a 302 to localhost reached the server). So
+    # the browser must never see a redirect: every http(s) request is fetched here
+    # with max_redirects=0. A navigation that redirects FAILs (like gate 2, gate 3
+    # measures canonical URLs: list the final URL in the route table); a
+    # subresource redirect is followed here, each hop checked before it connects,
+    # and only the final response is handed to the browser.
+    from urllib.parse import urljoin
+    navigation = route.request.is_navigation_request()
+    hop = url
+    for _ in range(MAX_REDIRECTS + 1):
+        try:
+            resp = route.fetch(url=hop, max_redirects=0)
+        except PlaywrightError:
+            route.abort("failed")
+            return
+        location = resp.headers.get("location")
+        if not (300 <= resp.status < 400 and location):
+            route.fulfill(response=resp)
+            return
+        nxt = urljoin(hop, location)
+        if navigation:
+            errors.append("%s: navigation redirected (HTTP %d -> %s); gate 3 measures canonical "
+                          "URLs only - list the final URL in the route table"
+                          % (url[:120], resp.status, nxt[:120]))
+            route.abort("blockedbyclient")
+            return
+        reason = egress_reason(nxt)
+        if reason is not None:
+            errors.append("egress blocked (SEC-A2): redirect %s -> %s: %s"
+                          % (hop[:120], nxt[:120], reason))
+            route.abort("blockedbyclient")
+            return
+        hop = nxt
+    errors.append("egress blocked (SEC-A2): %s: more than %d redirects" % (url[:120], MAX_REDIRECTS))
+    route.abort("blockedbyclient")
+
+
+def guard_websocket(ws):
+    reason = egress_reason(ws.url)
+    if reason is None:
+        ws.connect_to_server()
+        return
+    errors.append("egress blocked (SEC-A2): %s: %s" % (ws.url[:120], reason))
+    ws.close()
+
+
+def check_connected(resp):
+    """After the connection: the address really connected to must be allowed too."""
+    try:
+        addr = resp.server_addr()
+    except PlaywrightError:
+        addr = None
+    if not addr:
+        return  # file:, data:, cache: no network connection was made
+    from urllib.parse import urlsplit
+    host = urlsplit(resp.url).hostname or ""
+    if not (egress_guard.host_exempt(host) or egress_guard.ip_allowed(addr["ipAddress"])):
+        errors.append("egress blocked (SEC-A2): %s connected to non-public address %s"
+                      % (resp.url[:120], addr["ipAddress"]))
 
 with sync_playwright() as pw:
     # Chromium 沙箱默认开启（被测页面的 JS 在此执行；#6 SEC-A3）。只在两种情况下关闭：
@@ -163,14 +280,25 @@ with sync_playwright() as pw:
     browser = pw.chromium.launch(
         executable_path=os.environ.get("TOUCH_TARGET_CHROME", "/opt/meta-chromium/chrome"),
         chromium_sandbox=not no_sandbox,
-        args=["--disable-dev-shm-usage"])  # 2026-09-27: /dev/shm 仅 794M, 10MB 大页必 crash, 加此 flag 稳定
+        # --disable-dev-shm-usage: 2026-09-27 /dev/shm 仅 794M, 10MB 大页必 crash, 加此 flag 稳定;
+        # --no-proxy-server: 直连, 让 server_addr 核对的是真实目标地址 (SEC-A2)
+        args=["--disable-dev-shm-usage", "--no-proxy-server"])
     ctx = browser.new_context(viewport={"width": 390, "height": 844},
-                              has_touch=True, is_mobile=True)
+                              has_touch=True, is_mobile=True,
+                              service_workers="block")  # SW 请求绕过 route 拦截
+    ctx.route("**/*", guard_request)
+    ctx.route_web_socket("**/*", guard_websocket)
     page = ctx.new_page()
     page.on("pageerror", lambda exc: errors.append("JS error: %s" % exc))
+    page.on("response", check_connected)
     layouts = {}      # key -> 可交互元素布局签名, 用于识别"路由没生效、反复测同一页"
     for key, url in targets():
-        resp = page.goto(url)
+        try:
+            resp = page.goto(url)
+        except PlaywrightError as exc:
+            errors.append("%s: navigation failed: %s" % (key, str(exc).splitlines()[0]))
+            stats[key] = (0, 0)
+            continue
         # 同文档 hash 跳转时 goto 返回 None; 有响应时必须 2xx (5xx/404 错误页不能算通过)
         if resp is not None and not resp.ok:
             errors.append("%s: HTTP %d" % (key, resp.status))

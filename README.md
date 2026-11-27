@@ -29,8 +29,8 @@ Gate 1 exit codes: 0 PASS, 1 FAIL, 2 usage error, 3 NON-BINDING (skeleton run), 
 | # | 门禁 / 工具 | 脚本 | 判定 |
 |---|---|---|---|
 | 1 | 敏感信息扫描 | `security-watch/data-room-gate.sh [目录]` | 扫描目录内全部文件（不限 .txt）。FAIL：私钥 / `ghp_`、`sk-proj-`、`glpat-`、`npm_`、JWT、`aws_secret_access_key=`、Stripe `sk_test_`/`sk_live_`、Twilio `SK…`、SendGrid `SG.…`、Slack webhook URL、数据库连接串内联口令（`postgres://用户:口令@…`）等 token / 规则 2 停发字样 / 规则 1 封存日期及其各种写法 / 无法按文本扫描的文件（二进制、不可读）/ 目录为空。WARN（人工复核，exit 4）：口令赋值、邮箱地址。命中默认脱敏输出（`路径:行号` + 掩码/指纹），不回显明文；URL/连接串里的口令整段掩码，不保留首字符；指纹为完整 SHA-256，设 `GATE_FP_KEY` 则改用 HMAC-SHA256（无密钥时低熵内容的指纹可被持日志者离线猜测，allowlist 的 `fp:` 条目随之改用同一函数，换密钥须重新登记）。**过渡标注（中枢 2026-11-20 裁定）：打印 fp 的哈希输入是「行内容」，allowlist `fp:` 条目的哈希输入是「相对路径:行号:内容」，两面语义不同、不可互比、不可互抄（把打印 fp 抄进 allowlist 不会命中）；统一至「相对路径:行号:内容」并入批 2 与 ARCH-3 指纹重注册同批落码。**模式集装载严格校验：缺正文/空值/重复/未知条目、六规则与规则 5 排除清单不全即 exit 1。设 `GATE_JSON_OUT=<路径>` 另写机器可读运行记录（JSON：`run_id`、`gate_version`、结果、模式集/allowlist/脚本 sha256、被扫文件清单指纹、命中位置，不含命中内容） |
-| 2 | 首页可访问 | `qa-gates/homepage-200-check.sh [URL]` | 站点自身返回的状态码非 200（含重定向、4xx/5xx、连接失败、超时）即 FAIL |
-| 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕。页面返回非 2xx、出现 JS 报错或某条路由量不到任何可交互元素时也 FAIL；所有路由渲染出相同布局时 FAIL（路由表与站点不符，实际只测了一页），真实路由可经 `TOUCH_TARGET_ROUTES` 指定；环境变量未设时读脚本同目录的 `touch-target-routes.txt`（发布管线定版表，2026-10-27 按线上 sitemap 与首页链接面核定为 `/ /business/ /data-room/ /company/ /accessibility/ /contact/`），运行日志以 `[routes] source=` 标明实际生效来源 |
+| 2 | 首页可访问 | `qa-gates/homepage-200-check.sh [URL]` | 站点自身返回的状态码非 200（含重定向、4xx/5xx、连接失败、超时）即 FAIL；目标主机解析到非公网地址（环回/私网/链路本地/元数据/CGNAT）或无法解析也 FAIL（出站校验 SEC-A2，见下） |
+| 3 | 触控目标 | `qa-gates/touch-target-check.sh [URL]` | headless 渲染后量取所有可见可交互元素的 boundingBox，390px 视口下宽或高 < 44px 即 FAIL（WCAG 2.5.8）；纯文本内联链接豁免但留痕。页面返回非 2xx、出现 JS 报错或某条路由量不到任何可交互元素时也 FAIL；所有路由渲染出相同布局时 FAIL（路由表与站点不符，实际只测了一页），真实路由可经 `TOUCH_TARGET_ROUTES` 指定；环境变量未设时读脚本同目录的 `touch-target-routes.txt`（发布管线定版表，2026-10-27 按线上 sitemap 与首页链接面核定为 `/ /business/ /data-room/ /company/ /accessibility/ /contact/`），运行日志以 `[routes] source=` 标明实际生效来源；浏览器发出的每个请求都经出站校验，被拒即 FAIL（SEC-A2，见下） |
 | — | 颜色审计 | `security-watch/color-audit.py` | 只读：提取首页内联 CSS 与 `style=` 中的全部色值并统计 |
 | — | box-shadow 审计 | `security-watch/shadow-audit.py` | 只读：列出首页每条 box-shadow 声明的选择器、行号与取值 |
 | — | allowlist | `security-watch/gate-allowlist.txt` | 门禁 1 的误报在这里登记：按 `文件:行号:精确内容`（或 `fp:` 指纹）逐实例登记，二进制文件以 `bin:路径:sha256` 登记，子串匹配已废止；部署侧登记为准，仓内文件只有格式说明；审计产物归档在 `security-watch/archive/` |
@@ -69,6 +69,8 @@ vertciti-security-watch/
 ├── tests/            # 审计脚本冒烟测试
 └── docs/             # PRODUCT.md 与 assets
 ```
+
+**出站校验（SOTA SEC-A2）**：门禁 2、3 的每一跳都先经 `qa-gates/egress_guard.py` 校验，目标主机的全部解析地址都必须是公网单播地址，连接后再核对实际连接地址（门禁 2 看 curl 的 `%{remote_ip}`，门禁 3 看 Playwright 的 `server_addr()`）。门禁 3 不让浏览器自己跟随重定向（Playwright 只拦截重定向链的第一跳）：导航被重定向即 FAIL，路由表须列最终地址；子资源的重定向逐跳校验后再取回。两道门禁都直连、不走代理，因为经代理时无法核对实际地址；只有代理出口的环境会 FAIL。`QA_EGRESS_ALLOW_HOSTS`（空格分隔的精确主机名或 IP）只供本仓测试在 127.0.0.1 上起夹具用，每次豁免都会打印 `[egress]` 行。门禁 2 需要 `python3`（可经 `HOMEPAGE_CHECK_PYTHON` 指定）。
 
 每道门禁是独立脚本，以退出码向发布流水线报告结果；门禁 2 为 `qa-gates/homepage-200-check.sh`（此前只是文档里一条 `curl -sI … | head -1`，退出码恒为 0）。架构图见
 [docs/assets/architecture.png](docs/assets/architecture.png)。

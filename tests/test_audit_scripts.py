@@ -500,9 +500,9 @@ def http_server():
     srv.shutdown()
 
 
-def _run_gate2(url: str) -> subprocess.CompletedProcess:
+def _run_gate2(url: str, allow: str = "127.0.0.1") -> subprocess.CompletedProcess:
     env = {**os.environ, "NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1",
-           "HOMEPAGE_CHECK_TIMEOUT": "5"}
+           "HOMEPAGE_CHECK_TIMEOUT": "5", "QA_EGRESS_ALLOW_HOSTS": allow}
     return subprocess.run(
         ["bash", str(QA / "homepage-200-check.sh"), url],
         capture_output=True, text=True, env=env, check=False,
@@ -537,6 +537,77 @@ def test_gate2_fails_when_unreachable() -> None:
     res = _run_gate2("http://127.0.0.1:%d/" % port)
     assert res.returncode == 1, res.stdout
     assert "请求失败" in res.stdout
+
+
+# ---- SEC-A2: gate 2 checks the address before and after connecting ----
+
+@needs_bash
+@needs_curl
+def test_gate2_blocks_loopback_before_connecting(http_server: str) -> None:
+    res = _run_gate2(http_server + "/200", allow="")
+    assert res.returncode == 1, res.stdout
+    assert "出站被拒（SEC-A2）" in res.stdout and "non-public" in res.stdout
+    assert "[PASS]" not in res.stdout
+
+
+@needs_bash
+@pytest.mark.parametrize("url", [
+    "http://169.254.169.254/latest/meta-data/",   # cloud metadata
+    "http://10.0.0.1/", "http://192.168.1.1/", "http://100.64.0.1/",
+    "http://localhost/", "http://[::1]/", "http://[::ffff:10.0.0.1]/", "http://0.0.0.0/",
+    "http://no-such-host.invalid/",               # unresolvable: fail closed
+    "file:///etc/passwd", "gopher://example.com/",
+])
+def test_gate2_refuses_non_public_or_non_http_targets(url: str) -> None:
+    res = _run_gate2(url, allow="")
+    assert res.returncode == 1, res.stdout
+    assert "出站被拒（SEC-A2）" in res.stdout
+
+
+@needs_bash
+@needs_curl
+def test_gate2_exemption_is_logged(http_server: str) -> None:
+    res = _run_gate2(http_server + "/200")
+    assert res.returncode == 0, res.stdout
+    assert "[egress] 127.0.0.1" in res.stdout
+
+
+@needs_bash
+@needs_curl
+def test_gate2_pins_and_verifies_named_host(http_server: str) -> None:
+    # a host name goes through --resolve pinning and the %{remote_ip} re-check
+    port = http_server.rsplit(":", 1)[1]
+    res = _run_gate2("http://localhost:%s/200" % port, allow="localhost")
+    assert res.returncode == 0, res.stdout
+
+
+def _egress_guard():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("egress_guard", QA / "egress_guard.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("ip,ok", [
+    ("93.184.215.14", True), ("2606:4700::1111", True),
+    ("127.0.0.1", False), ("10.1.2.3", False), ("172.16.0.1", False), ("192.168.0.1", False),
+    ("169.254.169.254", False), ("100.64.0.1", False), ("0.0.0.0", False),
+    ("224.0.0.1", False), ("255.255.255.255", False), ("192.0.2.1", False),
+    ("::1", False), ("fe80::1", False), ("fc00::1", False), ("::ffff:127.0.0.1", False),
+    ("::ffff:8.8.8.8", True), ("64:ff9b::a00:1", False), ("not-an-ip", False),
+])
+def test_egress_ip_allowed(ip: str, ok: bool) -> None:
+    assert _egress_guard().ip_allowed(ip) is ok
+
+
+def test_egress_exemption_needs_exact_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    g = _egress_guard()
+    monkeypatch.setenv("QA_EGRESS_ALLOW_HOSTS", "127.0.0.1")
+    assert g.check_url("http://127.0.0.1:1/")[3] is None
+    assert g.check_url("http://localhost:1/")[3] is not None  # localhost is not 127.0.0.1
+    monkeypatch.delenv("QA_EGRESS_ALLOW_HOSTS")
+    assert "non-public" in g.check_url("http://127.0.0.1:1/")[3]
 
 
 @needs_bash

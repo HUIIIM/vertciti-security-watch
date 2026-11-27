@@ -37,6 +37,7 @@ def test_browser_is_available() -> None:
     assert AVAILABLE, ("gate 3 browser tests required but unavailable: TOUCH_TARGET_CHROME=%r, "
                        "playwright importable=%s" % (CHROME, bool(importlib.util.find_spec("playwright"))))
 
+HITS: list[str] = []
 BTN = '<button style="width:60px;height:60px">%s</button>'
 SMALL = '<button style="width:20px;height:20px">small</button>'
 
@@ -59,10 +60,11 @@ def _hash_page(extra: str = "", tail: str = "") -> str:
     return HASH_PAGE % (extra, tail)
 
 
-def _gate(target: str, routes: str) -> subprocess.CompletedProcess:
+def _gate(target: str, routes: str, allow: str = "") -> subprocess.CompletedProcess:
     env = {**os.environ, "TOUCH_TARGET_PYTHON": sys.executable,
            "TOUCH_TARGET_CHROME": CHROME, "TOUCH_TARGET_ROUTES": routes,
-           "NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}
+           "NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1",
+           "QA_EGRESS_ALLOW_HOSTS": allow}
     return subprocess.run(["bash", str(GATE), target], capture_output=True, text=True,
                           env=env, check=False, timeout=300)
 
@@ -75,7 +77,12 @@ def _file(tmp_path: Path, html: str) -> str:
 
 @pytest.fixture
 def site(tmp_path: Path):
-    """Local HTTP server: /, /b/ are pages; /500 answers HTTP 500; else 404."""
+    """Local HTTP server: /, /b/ are pages; /500 answers HTTP 500; else 404.
+
+    /redir-nav and /redir-img answer 302 to the same server under the name
+    "localhost" (not exempted in tests); /img-page/ embeds /redir-img. Every
+    request's Host header is appended to HITS.
+    """
     for sub, label in (("", "home"), ("b", "b")):
         d = tmp_path / "site" / sub
         d.mkdir(parents=True, exist_ok=True)
@@ -89,6 +96,20 @@ def site(tmp_path: Path):
             super().__init__(*a, directory=str(root), **kw)
 
         def do_GET(self) -> None:
+            HITS.append("%s %s" % (self.headers.get("Host"), self.path))
+            port = self.server.server_address[1]
+            if self.path in ("/redir-nav", "/redir-img"):
+                self.send_response(302)
+                self.send_header("Location", "http://localhost:%d/b/" % port)
+                self.end_headers()
+                return
+            if self.path == "/img-page/":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(("<html><body>%s<img src=/redir-img></body></html>"
+                                  % (BTN % "img")).encode())
+                return
             if self.path.startswith("/500"):
                 self.send_response(500)
                 self.end_headers()
@@ -99,6 +120,7 @@ def site(tmp_path: Path):
         def log_message(self, *args: object) -> None:
             pass
 
+    HITS.clear()
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield "http://127.0.0.1:%d" % srv.server_address[1]
@@ -146,18 +168,63 @@ def test_fails_on_page_js_error(tmp_path: Path) -> None:
 
 
 def test_passes_path_routes_over_http(site: str) -> None:
-    res = _gate(site + "/", "/ /b/")
+    res = _gate(site + "/", "/ /b/", allow="127.0.0.1")
     assert res.returncode == 0, res.stdout + res.stderr
     assert "total checked=" in res.stdout
 
 
 def test_fails_on_http_404_route(site: str) -> None:
-    res = _gate(site + "/", "/ /missing/")
+    res = _gate(site + "/", "/ /missing/", allow="127.0.0.1")
     assert res.returncode == 1, res.stdout + res.stderr
     assert "HTTP 404" in res.stdout
 
 
 def test_fails_on_http_500(site: str) -> None:
-    res = _gate(site + "/500", "home")
+    res = _gate(site + "/500", "home", allow="127.0.0.1")
     assert res.returncode == 1, res.stdout + res.stderr
     assert "HTTP 500" in res.stdout
+
+
+# ---- SEC-A2: every outbound hop is address-checked ----
+
+def test_blocks_loopback_target_without_exemption(site: str) -> None:
+    res = _gate(site + "/", "/ /b/")
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "egress blocked (SEC-A2)" in res.stdout and "non-public" in res.stdout
+
+
+def test_blocks_private_subresource_from_file_page(tmp_path: Path, site: str) -> None:
+    # a page under test must not be able to make the gate fetch internal addresses
+    tail = '<img src="%s/b/">' % site
+    res = _gate(_file(tmp_path, _hash_page(tail=tail)), "home catalog")
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "egress blocked (SEC-A2)" in res.stdout and "127.0.0.1" in res.stdout
+
+
+def test_blocks_metadata_address_subresource(tmp_path: Path) -> None:
+    tail = '<img src="http://169.254.169.254/latest/meta-data/">'
+    res = _gate(_file(tmp_path, _hash_page(tail=tail)), "home catalog")
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "169.254.169.254" in res.stdout and "non-public" in res.stdout
+
+
+def test_exemption_is_logged(site: str) -> None:
+    res = _gate(site + "/", "/ /b/", allow="127.0.0.1")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "[egress] 127.0.0.1 exempted" in res.stderr
+
+
+def test_navigation_redirect_fails_and_is_not_followed(site: str) -> None:
+    res = _gate(site + "/", "/redir-nav", allow="127.0.0.1")
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "navigation redirected (HTTP 302" in res.stdout
+    assert not [h for h in HITS if h.startswith("localhost")], HITS
+
+
+def test_subresource_redirect_to_blocked_host_never_connects(site: str) -> None:
+    # Playwright routes only the first hop of a redirect chain; the gate must still
+    # check the hop to "localhost" before any request reaches it
+    res = _gate(site + "/", "/img-page/ /b/", allow="127.0.0.1")
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "egress blocked (SEC-A2): redirect" in res.stdout
+    assert not [h for h in HITS if h.startswith("localhost")], HITS
