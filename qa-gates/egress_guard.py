@@ -18,7 +18,7 @@ exempts named hosts from the non-public check; it exists for the repo's own
 tests, which serve fixtures on 127.0.0.1. Callers log every exemption used.
 
 CLI (used by gate 2, a shell script):
-    python3 egress_guard.py resolve <URL>        -> "<host> <port> <ip>" or exit 1
+    python3 egress_guard.py resolve <URL>        -> "<host> <port> <ip>[,<ip>...]" or exit 1
     python3 egress_guard.py verify <HOST> <IP>   -> exit 0 if IP is allowed for HOST
     python3 egress_guard.py exempt <HOST>        -> exit 0 if HOST is in QA_EGRESS_ALLOW_HOSTS
 """
@@ -103,7 +103,7 @@ def main(argv: list[str]) -> int:
         if err:
             print(err, file=sys.stderr)
             return 1
-        print(host, port, ips[0])
+        print(host, port, ",".join(ips))
         return 0
     if len(argv) == 4 and argv[1] == "verify":
         return 0 if host_exempt(argv[2]) or ip_allowed(argv[3]) else 1
