@@ -70,6 +70,8 @@ vertciti-security-watch/
 └── docs/             # PRODUCT.md 与 assets
 ```
 
+**独立评估判定（VER-3）**：`.github/workflows/ivv-verdict.yml` 给每个 PR 的当前 head 写 `ivv/verdict` 状态，规则见 `scripts/ivv_verdict.py`。判定评论须以 `### 独立评估 · SOTA v<版本> · <head sha>` 开头，含可机读的判定行 `判定: PASS`（或 `FAIL`，中文释义可写在其后），作者须为仓库 OWNER、MEMBER 或 COLLABORATOR，SOTA 版本不低于 v1.3。推新提交后须对新 head 重新判定。
+
 每道门禁是独立脚本，以退出码向发布流水线报告结果；门禁 2 为 `qa-gates/homepage-200-check.sh`（此前只是文档里一条 `curl -sI … | head -1`，退出码恒为 0）。架构图见
 [docs/assets/architecture.png](docs/assets/architecture.png)。
 
