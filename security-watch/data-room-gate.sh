@@ -53,7 +53,7 @@
 #     GATE_ALLOW_SKELETON=1 的本地/测试运行：无命中 0、仅 WARN 为 4。
 #   - 规则 4 补 OpenAI sk-proj-、GitLab glpat-、npm_、JWT、aws_secret_access_key 赋值、
 #     Stripe/Restricted *_test_、Twilio SK、SendGrid SG.、Slack webhook URL、
-#     数据库连接串内联口令（postgres/mysql/mongodb/redis/amqp://用户:口令@）；
+#     数据库连接串内联口令（postgres/mysql/mongodb/redis/amqp://用户:口令@；2026-11-28 起扩展为任意 scheme://用户:口令@）；
 #   - 命中输出掩码不得保留任何凭据字符：URL/连接串 userinfo 口令一律整段掩码，
 #     真实邮箱仍保留首字符（此前 postgres://u:Zebra9@h 输出 Z****@h，泄露口令首字符）；
 #   - grep 输出改用 -Z（路径后接 NUL）解析，路径与行号不再因行内容形如 ref:2:… 或路径含 :数字: 而错位；

@@ -12,7 +12,7 @@
 1.pattern 1955[-/.][[:space:]]*1?1|1955[[:space:]]*年[[:space:]]*1?1[[:space:]]*月|nov(ember)?\.?[[:space:]]*1955
 2.pattern 占位词甲|占位词乙|PLACEHOLDERWORD
 3.pattern -----BEGIN .*PRIVATE KEY-----
-4.pattern gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{35}|(sk|rk)_(live|test)_[A-Za-z0-9]{8,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{8,}|sk-proj-[A-Za-z0-9_-]{20,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{30,}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[Aa][Ww][Ss]_[Ss][Ee][Cc][Rr][Ee][Tt]_[Aa][Cc][Cc][Ee][Ss][Ss]_[Kk][Ee][Yy][[:space:]]*[:=][[:space:]]*["']?[A-Za-z0-9/+=]{40}|\bSK[0-9a-f]{32}\b|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+|(postgres(ql)?|mysql|mariadb|mongodb(\+srv)?|rediss?|amqps?)://[^:/@[:space:]]*:[^@/[:space:]]+@
+4.pattern gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{35}|(sk|rk)_(live|test)_[A-Za-z0-9]{8,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{8,}|sk-proj-[A-Za-z0-9_-]{20,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{30,}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[Aa][Ww][Ss]_[Ss][Ee][Cc][Rr][Ee][Tt]_[Aa][Cc][Cc][Ee][Ss][Ss]_[Kk][Ee][Yy][[:space:]]*[:=][[:space:]]*["']?[A-Za-z0-9/+=]{40}|\bSK[0-9a-f]{32}\b|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+|[A-Za-z][A-Za-z0-9+.-]*://[^:/@[:space:]]*:[^@/[:space:]]+@
 5.pattern (password|passwd|pwd)\s*[:=]\s*["']?[^"' ]{6,}
 5.exclude password (requirement|policy|must|should)|your password|no password|passwordless
 6.pattern [A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}

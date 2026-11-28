@@ -927,3 +927,46 @@ def test_gate_allowlist_fp_entry_uses_same_function_as_emitted_fp(tmp_path: Path
     # with a key set, only the keyed entry exempts; the offline-computable one must not
     assert _run_gate(tmp_path, data, allowlist=plain, env={"GATE_FP_KEY": "k1"}).returncode == 1
     assert _run_gate(tmp_path, data, allowlist=keyed, env={"GATE_FP_KEY": "k1"}).returncode == 0
+
+
+# ---- rule 4: inline credentials in any URL scheme (#6 §1 L residual) ----
+
+@needs_bash
+@pytest.mark.parametrize("url", [
+    "https://admin:Zebra9Pass@api.example.com/x",
+    "http://svc:Zebra9Pass@10.0.0.5:8080/",
+    "ftp://ops:Zebra9Pass@files.example.com/",
+    "smtp://mailer:Zebra9Pass@smtp.example.com:587",
+    "https://:ghostTokenValue9@registry.example.com/",   # token-only userinfo
+    "git+https://bot:Zebra9Pass@git.example.com/org/repo.git",
+    "postgres://svcuser:SynthPass9@db.example.com/app",  # database schemes still covered
+])
+def test_gate_rule4_flags_credentials_in_any_url_scheme(tmp_path: Path, url: str) -> None:
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": "dsn " + url + "\n"}))
+    assert res.returncode == 1, (url, res.stdout)
+    assert "疑似密钥 token" in res.stdout and "Zebra9" not in res.stdout and "ghostToken" not in res.stdout
+
+
+@needs_bash
+@pytest.mark.parametrize("line", [
+    "see https://example.com:8443/path for docs",
+    "clone ssh://git@git.example.com:22/org/repo.git",
+    "open https://user@example.com/ to sign in",
+    "write to mailto:ops:team@example.com",
+])
+def test_gate_rule4_url_userinfo_no_false_positive(tmp_path: Path, line: str) -> None:
+    # host:port, user-without-password and mailto: are not inline credentials.
+    # (Some of these still WARN under rule 6 as e-mail-shaped strings: that is
+    # rule 6's existing behaviour, so only rule 4 is asserted here.)
+    res = _run_gate(tmp_path, _data(tmp_path, {"a.txt": CLEAN + line + "\n"}))
+    assert res.returncode != 1 and "疑似密钥 token" not in res.stdout, (line, res.stdout)
+
+
+@needs_bash
+def test_gate_rule4_documented_url_placeholder_fails_closed(tmp_path: Path) -> None:
+    # a placeholder like scheme://user:password@host is indistinguishable from a real
+    # credential: it fails closed and is cleared by an exact allowlist entry
+    line = "format: https://user:password@host/path"
+    data = _data(tmp_path, {"a.txt": line + "\n"})
+    assert _run_gate(tmp_path, data).returncode == 1
+    assert _run_gate(tmp_path, data, allowlist="a.txt:1:%s\n" % line).returncode == 0
