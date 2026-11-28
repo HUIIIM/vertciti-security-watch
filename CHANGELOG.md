@@ -9,6 +9,9 @@ yet, so everything is listed under Unreleased, derived from `git log`.
 
 ## [Unreleased]
 
+### Added
+- `ivv/verdict` 提交状态（SOTA VER-3，#6、#22）：`.github/workflows/ivv-verdict.yml` 与 `scripts/ivv_verdict.py`。每次 PR 推送或评论变动时，读取 PR 评论并给当前 head 写 `ivv/verdict` 状态。success 必须同时满足：IVV 抬头含当前 head 的 sha 且 SOTA ≥ v1.3；判定行可机读（`判定: PASS`，中文释义可写在其后）；作者为 OWNER、MEMBER 或 COLLABORATOR。`FAIL` 记为 failure；`合`、自由格式、旧 head、旧版尺子、生人评论、整体 N/A 一律 pending。新推送后状态回到 pending。工作流与脚本恒取默认分支版本（`pull_request_target` / `issue_comment`），不检出、不执行 PR 代码。待 #22 的 ruleset 把它列为必需检查后才有拦截力 / machine-checkable IVV verdict status.
+
 ### Security
 - 门禁 1 指纹语义过渡标注（中枢 2026-11-20 裁定）：打印 fp 哈希「行内容」、allowlist `fp:` 条目哈希「相对路径:行号:内容」，两面语义不同、不可互比、不可互抄——脚本头注与 `--help` 输出已显名标注；统一至「相对路径:行号:内容」并入批 2 与 ARCH-3 指纹重注册同批落码 / gate 1 fingerprint inputs are labelled as non-interchangeable pending unification in batch 2.
 - 门禁 1 批次 1（#6 评分卡 §3.1 F/L/K/I/J、§3.3、§3.4）/ gate 1 batch 1:
