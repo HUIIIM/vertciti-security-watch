@@ -1,6 +1,6 @@
 # vertciti security-watch — 产品一页纸 / Product one-pager
 
-> 状态 / Status：active（内部工具 / internal tool）· 版本 / Version：未发布正式版本（无 git tag）/ no tagged release · 更新 / Updated：2026-10-22
+> 状态 / Status：active（内部工具 / internal tool）· 版本 / Version：未发布正式版本（无 git tag）/ no tagged release · 更新 / Updated：2026-11-28（核对 main `6fc4f9f`）
 > 所属 / Part of：[vertciti](https://vertciti.com) — 一家公司，一个人生。
 
 ## 一句话 / One line
@@ -19,9 +19,9 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
   External users or generic CI use; default paths are tied to the maintainer's local layout (see limitations).
 
 ## 怎么用（三步）/ How to use
-1. 门禁 1 / Gate 1：`bash security-watch/data-room-gate.sh [目录]` — 扫描 `*.txt`，FAIL 时 exit 1。
+1. 门禁 1 / Gate 1：`bash security-watch/data-room-gate.sh [目录]` — 扫描目录内全部普通文件；二进制文件与符号链接不可扫描，即 FAIL。退出码为 0 PASS、1 FAIL、2 用法错误、3 NON-BINDING（只装载了仓内骨架模式集）、4 WARN（须人工复核）。
 2. 门禁 2 / Gate 2：`qa-gates/homepage-200-check.sh` — 站点自身状态码必须为 HTTP 200，否则 exit 1。
-3. 门禁 3 / Gate 3：`bash qa-gates/touch-target-check.sh [URL]` — 390px 视口下可交互元素宽高均需 ≥ 44px；依赖 playwright（解释器经环境变量 `TOUCH_TARGET_PYTHON` 指定）与 `/opt/meta-chromium/chrome`。
+3. 门禁 3 / Gate 3：`bash qa-gates/touch-target-check.sh [URL]` — 390px 视口下可交互元素宽高均需 ≥ 44px；依赖 playwright（解释器经环境变量 `TOUCH_TARGET_PYTHON` 指定）与 Chromium（默认 `/opt/meta-chromium/chrome`，可经 `TOUCH_TARGET_CHROME` 覆盖）。
 
 另有两个只读审计脚本 / Two read-only audit scripts：`security-watch/color-audit.py <index.html> [--json out.json]`（色值统计与聚类）、`security-watch/shadow-audit.py [--json PATH] [--table]`（box-shadow 逐项清单）。
 
@@ -33,8 +33,11 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
 | 与其他方案的效果对比 / Measured comparison | 未确认（TBD） | 未确认（TBD） |
 
 ## 证据 / Evidence
-- 测试 / Tests：`tests/test_audit_scripts.py` 共 14 个 pytest 用例（2026-10-26 本地运行 14 passed），覆盖 color-audit 归一化与提取、shadow-audit 规则解析、data-room-gate 的 PASS / token FAIL / 目录不存在 FAIL，以及 issue #6 的 fail-closed 回归（allowlist 缺失 / 空行 / 子串条目 / 零文件 / 精确条目 / 口令脱敏）。CI：`.github/workflows/ci.yml` 的 `test` job（pytest + ruff）。
-  14 pytest cases, run locally on 2026-10-26: 14 passed.
+- 测试 / Tests：共 133 个 pytest 用例（2026-11-28 在 main `6fc4f9f` 以 root 本地运行：121 passed, 12 skipped；skip 为 10 个门禁 3 浏览器用例，以及 2 个 root 下不适用的权限用例）。
+  - `tests/test_audit_scripts.py`：覆盖 color-audit、shadow-audit、门禁 1 的 fail-closed 回归（allowlist、模式集严格装载、规则 4 各类 token、掩码、退出码契约、运行记录）、门禁 2 以及门禁 3 的路由表配置。
+  - `tests/test_gate3_browser.py`：10 个门禁 3 浏览器用例，需要 `TOUCH_TARGET_CHROME` 与 playwright，未配置时 skip。main 的 CI 尚未安装浏览器（相关 job 在 #35）。
+  - CI：`.github/workflows/ci.yml` 跑 pytest、ruff、shellcheck、py_compile。
+  133 pytest cases; on main `6fc4f9f` as root (2026-11-28): 121 passed, 12 skipped (10 gate-3 browser tests without a configured browser, 2 permission tests that do not apply to root). Main's CI does not install a browser yet.
 - 演示素材（示意）/ Demo assets (illustrative)：`docs/assets/demo.gif`、`docs/assets/screenshot-gate.png` 为合成示意图、非真实运行录制，真实录屏待重录；`security-watch/archive/color-audit-2026-09-27.json`（一次 color-audit 的归档输出）。
 - 不能证明的 / Not proven：门禁 3（touch-target-check.sh）与 shadow-audit.py 依赖本机文件与浏览器环境，测试未覆盖其端到端运行；生产发布流水线是否强制调用这些脚本，本仓库内无法验证。
   Gate 3 and shadow-audit.py depend on local files/browser and are not covered end-to-end; whether the production pipeline enforces these gates is not verifiable from this repo.
@@ -44,9 +47,9 @@ The vertciti maintainer runs these scripts before a vertciti.com release to gate
 - 已知限制 / Known limitations：
   - `data-room-gate.sh` 的 allowlist 按脚本同目录相对解析、随脚本分发，缺失/不可读时 fail-closed 停发；条目为精确匹配（`文件:行号:精确内容` 或 `fp:` 指纹），子串匹配已废止；可扫描文件数为 0 时 FAIL，不真空通过（2026-10-26，issue #6）。早期版本曾固定为维护者本机绝对路径——该目录不存在时 `grep -f` 报错被管道吞掉，FAIL/WARN 检查（规则 1、规则 2、token、口令、邮箱）会被跳过并输出 PASS（2026-10-22 本地复现，已修复）。私钥块检查不受影响。
     The allowlist now resolves relative to the script's own directory and ships with it; a missing or unreadable allowlist fails closed. Entries match exactly (`file:line:exact content` or `fp:` fingerprints); substring matching was abolished, and zero scannable files fails instead of passing vacuously (2026-10-26, issue #6). An earlier version used a fixed maintainer-machine absolute path, and a missing directory silently skipped most checks and reported PASS (reproduced locally 2026-10-22; fixed). The private-key check was unaffected.
-  - 只扫描 `*.txt` 文件 / Only `*.txt` files are scanned.
+  - 门禁 1 扫描全部普通文件；二进制文件（如 .pdf、.docx）不可扫描，会 FAIL 并标出，须先抽取文本 / Gate 1 scans every regular file; binary files cannot be scanned and FAIL.
   - `shadow-audit.py` 输入路径须经位置参数或环境变量 `SHADOW_AUDIT_SRC` 显式传入，无内置默认目标（早期版本曾硬编码维护者本机生产源路径，已参数化）。
-  - `touch-target-check.sh` 默认目标与依赖路径绑定维护者本机。
+  - `touch-target-check.sh` 无内置默认目标：须传 URL，或经 `TOUCH_TARGET_PROD_FILE` 指定生产 `index.html` 的 `file://` URL。浏览器默认路径 `/opt/meta-chromium/chrome` 可经 `TOUCH_TARGET_CHROME` 覆盖。
 - 安全与隐私 / Security & privacy：脚本只读本地文件并输出到 stdout（命中的 token 只输出前缀如 `ghp_****`，其余打码 / matched tokens print only their prefix）；不存储、不上传数据。漏洞报告见 [`.github/SECURITY.md`](../.github/SECURITY.md)。
 
 ## 与其他 vertciti 产品的组合 / With other vertciti products

@@ -1,6 +1,6 @@
 # AGENTS.md - instructions for AI coding agents working in this repo
 
-Repo: vertciti-security-watch (HUIIIM, private). Brand: vertciti (lowercase).
+Repo: vertciti-security-watch (HUIIIM, public: visible as a showcase; all rights reserved, see LICENSE). Brand: vertciti (lowercase).
 Stack: Shell gate scripts + Python audit scripts
 
 ## Rules
